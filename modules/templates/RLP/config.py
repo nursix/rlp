@@ -889,6 +889,7 @@ def config(settings):
                     filter_widgets = [
                         S3TextFilter(text_search_fields,
                                      label = T("Search"),
+                                     comment = T("Search by ID or name (Note that records with hidden names can only be found by ID). Can use * or ? as wildcards."),
                                      ),
                         S3OptionsFilter("pool_membership.group_id",
                                         label = T("Pool"),
@@ -950,7 +951,7 @@ def config(settings):
     settings.customise_pr_person_controller = customise_pr_person_controller
 
     # -------------------------------------------------------------------------
-    def delegation_workflow(table, record):
+    def delegation_workflow(table, record, person_id=None):
         """
             Enforce workflow in delegation records
 
@@ -958,17 +959,29 @@ def config(settings):
             @param record: the delegation record
         """
 
-        workflow = {"REQ": ("REQ", "APPR", "DECL", "CANC"),
-                    "APPR": ("APPR", "CANC", "IMPL"),
-                    "IMPL": ("IMPL", "CANC",),
-                    }
-
-        status = record.status
-        next_status = workflow.get(status)
-
         field = table.status
-        if not next_status:
-            # Final status => can't be changed
+        if not record:
+            status = None
+            if person_id and open_pool_member(person_id):
+                next_status = ("APPR", "DECL")
+            else:
+                next_status = ("REQ")
+                field.default = "REQ"
+                field.writable = False
+        else:
+            workflow = {#"REQ": ("REQ", "APPR", "DECL", "CANC"),
+                        "APPR": ("APPR", "CANC", "IMPL"),
+                        "IMPL": ("IMPL", "CANC",),
+                        }
+            if current.auth.s3_has_role("COORDINATOR"):
+                workflow["REQ"] = ("REQ", "APPR", "DECL")
+            else:
+                workflow["REQ"] = ("REQ", "CANC")
+            status = record.status
+            next_status = workflow.get(status)
+
+        if not next_status or len(next_status) == 1:
+            # Status can't be changed
             field.writable = False
         else:
             requires = field.requires
@@ -983,17 +996,18 @@ def config(settings):
             field.writable = True
 
         # Can only change dates while not processed yet
-        if status != "REQ":
+        if status and status != "REQ":
             field = table.date
             field.writable = False
             field = table.end_date
             field.writable = False
 
         # Can never change person or organisation
-        field = table.person_id
-        field.writable = False
-        field = table.organisation_id
-        field.writable = False
+        if record:
+            field = table.person_id
+            field.writable = False
+            field = table.organisation_id
+            field.writable = False
 
     # -------------------------------------------------------------------------
     def delegation_read_multiple_orgs():
@@ -1096,19 +1110,19 @@ def config(settings):
             # Apply delegation workflow rules, determine earliest start date
             record = r.record
             if record:
-                delegation_workflow(r.resource.table, record)
                 min_date = min(record.date, tomorrow) if record.date else tomorrow
             else:
                 min_date = tomorrow
+            delegation_workflow(r.resource.table, record, person_id=volunteer_id)
 
         elif r.component.tablename == "hrm_delegation":
             # On tab of volunteer file
             if r.component_id:
                 r.component.load()
                 record = r.component._rows[0]
-                delegation_workflow(r.component.table, record)
             else:
                 record = None
+            delegation_workflow(r.component.table, record, person_id=r.id)
 
             # Determine earliest start date
             if record:
