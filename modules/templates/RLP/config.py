@@ -4,20 +4,18 @@ import datetime
 
 from collections import OrderedDict
 
-from gluon import current, URL, A
+from gluon import current, URL, A, DIV, TABLE, TR
 from gluon.storage import Storage
 
-from s3 import FS, S3Represent, s3_fullname
+from s3 import FS, S3DateFilter, S3Represent, s3_fullname
 from s3dal import original_tablename
+
+ALLOWED_FORMATS = ("html", "iframe", "popup", "aadata", "json", "xls", "pdf")
 
 def config(settings):
     """
-        Template settings: 'Skeleton' designed to be copied to quickly create
-                           custom templates
-
-        All settings which are to configure a specific template are located
-        here. Deployers should ideally not need to edit any other files outside
-        of their template folder.
+        Settings for Rhineland-Palatinate (RLP) Crisis Management Tool
+        - used to manage Volunteer Pools for COVID-19 response
     """
 
     T = current.T
@@ -227,6 +225,28 @@ def config(settings):
         return realm_entity
 
     settings.auth.realm_entity = rlp_realm_entity
+
+    # -------------------------------------------------------------------------
+    def customise_cms_post_resource(r, tablename):
+
+        from s3 import S3SQLCustomForm
+
+        current.s3db.configure("cms_post",
+                               crud_form = S3SQLCustomForm("name",
+                                                           #"title",
+                                                           "body",
+                                                           "date",
+                                                           "comments",
+                                                           ),
+                               list_fields = ["post_module.module",
+                                              "post_module.resource",
+                                              "name",
+                                              "date",
+                                              "comments",
+                                              ],
+                               )
+
+    settings.customise_cms_post_resource = customise_cms_post_resource
 
     # -------------------------------------------------------------------------
     def customise_org_organisation_resource(r, tablename):
@@ -690,7 +710,13 @@ def config(settings):
 
             if r.controller == "vol":
 
-                coordinator = current.auth.s3_has_role("COORDINATOR")
+                has_role = current.auth.s3_has_role
+                coordinator = has_role("COORDINATOR")
+
+                if not coordinator:
+                    settings.ui.export_formats = ("pdf", "xls")
+                    if r.representation not in ALLOWED_FORMATS:
+                        r.error(403, current.ERROR.NOT_PERMITTED)
 
                 resource = r.resource
 
@@ -700,6 +726,39 @@ def config(settings):
                 # Only COORDINATOR (and ADMIN) can see volunteers outside of pools
                 if not coordinator:
                     resource.add_filter(FS("pool_membership.id") > 0)
+
+                # Availability Filter
+                get_vars = r.get_vars
+                parse_dt = current.calendar.parse_date
+                available_fr = parse_dt(get_vars.get("available__ge"))
+                available_to = parse_dt(get_vars.get("available__le"))
+                if available_fr or available_to:
+
+                    # Filter to join active deployments during interval
+                    def ongoing(ctable):
+                        start = ctable.date
+                        end = ctable.end_date
+                        if available_fr and available_to:
+                            query = (start <= available_to) & \
+                                    ((end >= available_fr) | (end == None))
+                        elif available_fr:
+                            query = (start >= available_fr) | \
+                                    (end >= available_fr)
+                        else:
+                            query = (start <= available_to) | \
+                                    (start == None)
+                        return query & ctable.status.belongs(("APPR", "IMPL"))
+
+                    # Add filtered join
+                    s3db.add_components("pr_person",
+                                        hrm_delegation = {"name": "ongoing",
+                                                          "joinby": "person_id",
+                                                          "filterby": ongoing,
+                                                          },
+                                        )
+
+                    # Filter for volunteers with no active delegations in interval
+                    resource.add_filter(FS("ongoing.id") == None)
 
                 # HR type defaults to volunteer (already done in controller)
                 #hrtable = s3db.hrm_human_resource
@@ -711,6 +770,7 @@ def config(settings):
                     from s3 import (IS_ONE_OF,
                                     IS_PERSON_GENDER,
                                     S3AgeFilter,
+                                    #S3DateFilter,
                                     S3LocationFilter,
                                     S3LocationSelector,
                                     S3OptionsFilter,
@@ -898,6 +958,10 @@ def config(settings):
                         S3OptionsFilter("occupation_type_person.occupation_type_id",
                                         options = lambda: s3_get_filter_opts("pr_occupation_type"),
                                         ),
+                        RLPAvailabilityFilter("delegation.date",
+                                              label = T("Available"),
+                                              #hide_time = True,
+                                              ),
                         S3LocationFilter("current_address.location_id",
                                          label = T("Place of Residence"),
                                          levels = ("L2", "L3"),
@@ -931,9 +995,15 @@ def config(settings):
                 elif r.component_name == "delegation":
 
                     # HRMANAGERs and ADMINs see the list
-                    if not current.auth.s3_has_role("HRMANAGER") and \
+                    if not has_role("HRMANAGER") and \
                        r.interactive and r.method is None and not r.component_id:
                         r.method = "organize"
+                    if coordinator:
+                        s3db.add_custom_callback("hrm_delegation",
+                                                 "onaccept",
+                                                 hrm_delegation_update_onaccept,
+                                                 method = "update",
+                                                 )
 
             elif callable(standard_prep):
                 result = standard_prep(r)
@@ -1027,6 +1097,157 @@ def config(settings):
         return multiple_orgs, org_ids
 
     # -------------------------------------------------------------------------
+    def hrm_delegation_update_onaccept(form):
+        """
+            Coordinator has updated a Request
+            - if this is an approval then send a notification
+        """
+
+        form_vars = form.vars
+
+        record_id = form_vars.get("id")
+        if not record_id:
+            # Nothing we can do
+            return
+
+        # Check previous status
+        try:
+            if form.record.status != "REQ":
+                # This was not a pending request => do nothing
+                return
+        except AttributeError:
+            # Can't determine previous status => do nothing
+            return
+
+        db = current.db
+        s3db = current.s3db
+
+        # Load the delegation record
+        # - fields are often read-only in forms, so likely not in form.vars
+        table = s3db.hrm_delegation
+        row = db(table.id == record_id).select(table.status,
+                                               table.organisation_id,
+                                               table.person_id,
+                                               table.date,
+                                               table.end_date,
+                                               table.comments,
+                                               limitby = (0, 1),
+                                               ).first()
+        status = row.status
+        person_id = row.person_id
+        if status != "APPR" or open_pool_member(person_id):
+            # Not approved, or open pool member => no action
+            return
+
+        # Details for email
+        start_date = row.date
+        end_date = row.end_date
+        comments = row.comments
+
+        # Send Email to the Org, the Coordinator and the Volunteer
+
+        # Lookup details of requesting org
+        organisation_id = row.organisation_id
+        otable = s3db.org_organisation
+        org = db(otable.id == organisation_id).select(otable.name,
+                                                      limitby = (0, 1)
+                                                      ).first()
+        org_name = org.name
+
+        # Lookup details of requested volunteer
+        ptable = s3db.pr_person
+        person = db(ptable.id == person_id).select(ptable.pe_label,
+                                                   limitby = (0, 1)
+                                                   ).first()
+        pe_label = person.pe_label
+
+        # Compose Mail
+        # Subject & Message read from CMS
+        ctable = s3db.cms_post
+        ltable = s3db.cms_post_module
+        query = (ltable.module == "hrm") & \
+                (ltable.resource == "delegation") & \
+                (ltable.post_id == ctable.id) & \
+                (ctable.name == "Subject") & \
+                (ctable.deleted == False)
+        subject = db(query).select(ctable.body,
+                                   limitby = (0, 1)
+                                   ).first()
+        if not subject:
+            # Disabled
+            return
+
+        try:
+            subject = subject.body % \
+                    {"system_name": settings.get_system_name_short(),
+                     "person": pe_label,
+                     "org": org_name,
+                     }
+        except:
+            current.session.warning = T("Notifications not sent - invalid Subject")
+            return
+
+        query = (ltable.module == "hrm") & \
+                (ltable.resource == "delegation") & \
+                (ltable.post_id == ctable.id) & \
+                (ctable.name == "Message") & \
+                (ctable.deleted == False)
+        message = db(query).select(ctable.body,
+                                   limitby = (0, 1)
+                                   ).first()
+        if message and message.body:
+            message = message.body % \
+                        {"person": pe_label,
+                         "org": org_name,
+                         "start_date": start_date,
+                         "end_date": end_date,
+                         }
+        else:
+            message = ""
+        if comments is not None:
+            message = "%s\n%s" % (message, comments)
+
+        # Lookup Email Addresses to send to
+        #ctable = s3db.pr_contact
+        #query = (ptable.id == person_id) & \
+        #        (ptable.pe_id == ctable.pe_id) & \
+        #        (ctable.contact_method == "EMAIL") & \
+        #        (ctable.deleted == False)
+        #emails = db(query).select(ctable.value)
+        #emails = [e.value for e in emails]
+        emails = []
+
+        stable = s3db.org_office
+        query = (stable.organisation_id == organisation_id)
+        office = db(query).select(stable.email,
+                                  limitby = (0, 1),
+                                  orderby = stable.created_on
+                                  ).first()
+        try:
+            org_email = office.email
+        except AttributeError:
+            org_email = None
+        if org_email is not None:
+            emails.append(org_email)
+
+        user = current.auth.user
+        if user and user.email:
+            cc = user.email
+        else:
+            cc = None
+            #emails.append(user.email)
+
+        send_email = current.msg.send_email
+        for email in emails:
+            send_email(to = email,
+                       cc = cc,
+                       subject = subject,
+                       message = message,
+                       )
+
+        current.session.information = T("Notifications sent")
+
+    # -------------------------------------------------------------------------
     def customise_hrm_delegation_resource(r, tablename):
 
         s3db = current.s3db
@@ -1062,6 +1283,27 @@ def config(settings):
         field = table.person_id
         field.represent = rlp_DelegatedPersonRepresent()
 
+        if r.interactive:
+            # Add tooltip for status-field to explain statuses
+            field = table.status
+            represent = field.represent
+            status_help = TABLE(
+                            TR(represent("REQ"), T("Requested")),
+                            TR(represent("APPR"), T("Accepted by coordinator/volunteer")),
+                            TR(represent("DECL"), T("Declined by coordinator/volunteer")),
+                            TR(represent("CANC"), T("Cancelled by requesting organisation or volunteer")),
+                            TR(represent("IMPL"), T("Deployment carried out")),
+                            )
+
+            field.comment = DIV(DIV(status_help,
+                                    _class = "htmltip-content",
+                                    _id = "example",
+                                    ),
+                                _class = "htmltip",
+                                _show = "#example",
+                                _title = T("Status"),
+                                )
+
         if r.method == "organize":
             # Cannot change dates with the organizer
             # - but may be possible in the popup
@@ -1093,6 +1335,7 @@ def config(settings):
                 organize["title"] = "organisation_id"
                 organize["description"] = ["date",
                                            "end_date",
+                                           "requested_on",
                                            "status",
                                            ]
             else:
@@ -1101,6 +1344,7 @@ def config(settings):
                 organize["description"] = ["organisation_id",
                                            "date",
                                            "end_date",
+                                           "requested_on",
                                            "status",
                                            ]
 
@@ -1133,6 +1377,7 @@ def config(settings):
             organize["title"] = "organisation_id"
             organize["description"] = ["date",
                                        "end_date",
+                                       "requested_on",
                                        "status",
                                        ]
 
@@ -1155,8 +1400,8 @@ def config(settings):
 
         # Reconfigure
         s3db.configure("hrm_delegation",
-                       organize = organize,
                        deletable = False,
+                       organize = organize,
                        )
 
     settings.customise_hrm_delegation_resource = customise_hrm_delegation_resource
@@ -1164,9 +1409,9 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_hrm_delegation_controller(**attr):
 
-        request = current.request
-
+        s3db = current.s3db
         s3 = current.response.s3
+        request = current.request
 
         # Enable bigtable features
         settings.base.bigtable = True
@@ -1186,12 +1431,19 @@ def config(settings):
 
         # Must not create or delete delegations from delegation list
         if not volunteer_id:
-            current.s3db.configure("hrm_delegation",
-                                   insertable = False,
-                                   )
+            s3db.configure("hrm_delegation",
+                           insertable = False,
+                           )
 
         standard_prep = s3.prep
         def custom_prep(r):
+
+            coordinator = current.auth.s3_has_role("COORDINATOR")
+
+            if not coordinator:
+                settings.ui.export_formats = ("pdf", "xls")
+                if r.representation not in ALLOWED_FORMATS:
+                    r.error(403, current.ERROR.NOT_PERMITTED)
 
             # Call standard prep
             result = standard_prep(r) if callable(standard_prep) else True
@@ -1230,13 +1482,19 @@ def config(settings):
                     query &= FS("status").belongs(status_opts)
                 r.resource.add_filter(query)
 
-            coordinator = current.auth.s3_has_role("COORDINATOR")
             multiple_orgs = delegation_read_multiple_orgs()[0]
+
+            if coordinator:
+                s3db.add_custom_callback("hrm_delegation",
+                                         "onaccept",
+                                         hrm_delegation_update_onaccept,
+                                         method = "update",
+                                         )
 
             if r.interactive:
 
                 if not volunteer_id:
-                    from s3 import S3DateFilter, S3OptionsFilter, s3_get_filter_opts
+                    from s3 import S3OptionsFilter, s3_get_filter_opts
                     filter_widgets = [
                         S3OptionsFilter("person_id$pool_membership.group_id",
                                         label = T("Pool"),
@@ -1245,19 +1503,16 @@ def config(settings):
                         S3DateFilter("date",
                                      hidden = True,
                                      ),
-                                     S3DateFilter("end_date",
-                                                  hidden = True,
-                                                  ),
-                                     ]
+                        S3DateFilter("end_date",
+                                     hidden = True,
+                                     ),
+                        ]
 
                     # Status-Filter
-                    field = r.table.status
                     if not status_opts:
-                        status_filter_opts = [opt for opt in field.requires.options()
-                                              if opt[0]
-                                              ]
+                        status_filter_opts = [opt for opt in s3db.hrm_delegation_status_opts]
                     else:
-                        status_filter_opts = [opt for opt in field.requires.options()
+                        status_filter_opts = [opt for opt in s3db.hrm_delegation_status_opts
                                               if opt[0] in status_opts
                                               ]
                     if len(status_filter_opts) > 1:
@@ -1276,11 +1531,12 @@ def config(settings):
                                             ))
 
                     r.resource.configure(filter_widgets = filter_widgets,
-                                        )
+                                         )
             list_fields = [(T("Pool"), "person_id$pool_membership.group_id"),
                            "person_id",
                            "date",
                            "end_date",
+                           "requested_on",
                            "status",
                            "comments",
                            ]
@@ -1661,6 +1917,20 @@ def rlp_req_rheader(r, tabs=None):
                                                          record=record,
                                                          )
     return rheader
+
+# =============================================================================
+class RLPAvailabilityFilter(S3DateFilter):
+    """
+        Date-Range filter with custom variable
+        - without this then we parse as a vfilter which clutters error console
+          & is inefficient (including preventing a bigtable optimisation)
+    """
+
+    @classmethod
+    def _variable(cls, selector, operator):
+
+        return super()._variable("available", operator)
+
 # =============================================================================
 class rlp_DelegatedPersonRepresent(S3Represent):
 

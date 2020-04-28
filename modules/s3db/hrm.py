@@ -5342,6 +5342,7 @@ class HRDelegationModel(S3Model):
     """
 
     names = ("hrm_delegation",
+             "hrm_delegation_status_opts",
              )
 
     def model(self):
@@ -5391,25 +5392,24 @@ class HRDelegationModel(S3Model):
 
         # ---------------------------------------------------------------------
         # Delegation
-        # TODO make person component
         #
         tablename = "hrm_delegation"
         define_table(tablename,
                      self.org_organisation_id(
                          empty = False,
-                         comment = DIV(_class="tooltip",
+                         comment = DIV(_class = "tooltip",
                                        # TODO tooltip depends on workflow
-                                       _title="%s|%s" % (T("Requesting Organisation"),
-                                                         T("The organisation requesting the delegation"),
-                                                         ),
+                                       _title = "%s|%s" % (T("Requesting Organisation"),
+                                                           T("The organisation requesting the delegation"),
+                                                           ),
                                        ),
                          ),
                      self.pr_person_id(
                          empty = False,
-                         comment = DIV(_class="tooltip",
-                                       _title="%s|%s" % (T("Person"),
-                                                         T("The person to be delegated"),
-                                                         ),
+                         comment = DIV(_class = "tooltip",
+                                       _title = "%s|%s" % (T("Person"),
+                                                           T("The person to be delegated"),
+                                                           ),
                                        ),
                          ),
                      s3_date(label = T("Start Date"),
@@ -5419,13 +5419,18 @@ class HRDelegationModel(S3Model):
                              label = T("End Date"),
                              set_max = "#hrm_delegation_date",
                              ),
+                     s3_datetime("requested_on",
+                                 label = T("Requested on"),
+                                 default = "now",
+                                 writable = False,
+                                 ),
                      Field("status",
                            default = delegation_status[0],
                            requires = IS_IN_SET(delegation_status,
                                                 zero = None,
                                                 sort = False,
                                                 ),
-                           represent = S3Represent(options=dict(delegation_status)),
+                           represent = S3Represent(options = dict(delegation_status)),
                            ),
                      # Enable in template if/as required:
                      Field("hours_per_week", "integer",
@@ -5448,12 +5453,13 @@ class HRDelegationModel(S3Model):
             msg_record_modified = T("Delegation updated"),
             msg_record_deleted = T("Delegation deleted"),
             msg_list_empty = T("No Delegations currently registered"),
-        )
+            )
 
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return {"hrm_delegation_status_opts": delegation_status,
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -5462,7 +5468,7 @@ class HRDelegationModel(S3Model):
 
         #dummy = S3ReusableField.dummy
 
-        return {}
+        return {"hrm_delegation_status_opts": {}}
 
 # =============================================================================
 def hrm_programme_hours_month(row):

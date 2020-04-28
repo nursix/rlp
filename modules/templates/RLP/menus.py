@@ -177,6 +177,13 @@ class S3OptionsMenu(default.S3OptionsMenu):
         return cls.vol()
 
     # -------------------------------------------------------------------------
+    @classmethod
+    def pr(cls):
+        """ Person Management """
+
+        return cls.vol()
+
+    # -------------------------------------------------------------------------
     @staticmethod
     def vol():
         """ VOL / Volunteer Management """
@@ -207,7 +214,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Finalized", vars = {"workflow": "o"}),
                         M("Organizer", m="organize", restrict="HRMANAGER"),
                         ),
-                    M("Administration", link=False)(
+                    M("Administration", link=False, restrict="ADMIN")(
                         M("Occupation Types", c="pr", f="occupation_type"),
                         M("Skill Types", c="hrm", f="skill"),
                         M("Competency Levels", c="hrm", f="competency_rating"),
