@@ -2,7 +2,7 @@
 
 """ Sahana Eden Project Model
 
-    @copyright: 2011-2019 (c) Sahana Software Foundation
+    @copyright: 2011-2020 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -1047,7 +1047,7 @@ class S3ProjectModel(S3Model):
 
         if r.representation == "html" and r.name == "project":
 
-            appname = r.application
+            #appname = r.application
             response = current.response
             s3 = response.s3
 
@@ -7108,7 +7108,9 @@ def project_status_represent(value):
     if representation in ("pdf", "xls"):
         return represent
 
-    if value >= 80:
+    if value is None:
+        colour = "ff0000" # Red
+    elif value >= 80:
         colour = "00ff00" # Green
     elif value  >= 60:
         colour = "ffff00" # Yellow

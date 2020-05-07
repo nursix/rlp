@@ -4,7 +4,7 @@
 
     @requires: U{B{I{gluon}} <http://web2py.com>}
 
-    @copyright: 2009-2019 (c) Sahana Software Foundation
+    @copyright: 2009-2020 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -967,6 +967,9 @@ class S3Config(Storage):
             ("editor", T("Editor")),
             ("super", T("Super Editor"))
         ]))
+
+    def get_auth_approve_user_message(self):
+        return self.auth.get("auth_approve_user_message", None)
 
     def get_auth_set_presence_on_login(self):
         return self.auth.get("set_presence_on_login", False)

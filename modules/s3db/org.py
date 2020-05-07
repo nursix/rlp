@@ -2,7 +2,7 @@
 
 """ Sahana Eden Organisation Model
 
-    @copyright: 2009-2019 (c) Sahana Software Foundation
+    @copyright: 2009-2020 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -3778,6 +3778,11 @@ class S3SiteTagModel(S3Model):
         # - Key-Value extensions
         # - can be used to provide conversions to external systems, such as:
         #   * HXL
+        #   * OpenStreetMap (although their IDs can change over time)
+        #   * Government IDs
+        #   * PAHO/WHO for Hospitals
+        #   * Wikipedia URLs
+        # - can be used to identify a Source (GPS, Imagery, Wikipedia, etc)
         # - can be a Triple Store for Semantic Web support
         #
         tablename = "org_site_tag"
@@ -3795,9 +3800,9 @@ class S3SiteTagModel(S3Model):
                           *s3_meta_fields())
 
         self.configure(tablename,
-                       deduplicate = S3Duplicate(primary=("site_id",
-                                                          "tag",
-                                                          ),
+                       deduplicate = S3Duplicate(primary = ("site_id",
+                                                            "tag",
+                                                            ),
                                                  ),
                        )
 
