@@ -5,7 +5,7 @@
 # RLP Template Version 1.0.1 => 1.0.2
 #
 # Execute in web2py folder after code upgrade like:
-# python web2py.py -S eden -M -R applications/eden/modules/templates/DRKCM/upgrade/1.0.1-1.0.2.py
+# python web2py.py -S eden -M -R applications/eden/modules/templates/RLP/upgrade/1.0.1-1.0.2.py
 #
 import datetime
 import sys
@@ -30,7 +30,7 @@ def infoln(msg):
 dtable = s3db.hrm_delegation
 
 IMPORT_XSLT_FOLDER = os.path.join(request.folder, "static", "formats", "s3csv")
-TEMPLATE_FOLDER = os.path.join(request.folder, "modules", "templates", "DRKCM")
+TEMPLATE_FOLDER = os.path.join(request.folder, "modules", "templates", "RLP")
 
 # -----------------------------------------------------------------------------
 # Upgrade user roles
