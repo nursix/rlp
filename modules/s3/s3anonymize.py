@@ -28,7 +28,7 @@
 """
 
 import json
-import uuid
+from uuid import uuid4
 
 from gluon import current, A, BUTTON, DIV, FORM, INPUT, LABEL, P
 
@@ -64,7 +64,7 @@ class S3Anonymize(S3Method):
         if not record_id:
             r.error(400, "No target record specified")
         if not self.permitted(table, record_id):
-            r.unauthorized()
+            r.unauthorised()
 
         if r.representation == "json":
             if r.http == "POST":
@@ -356,13 +356,14 @@ class S3AnonymizeWidget(object):
 
     # -------------------------------------------------------------------------
     @classmethod
-    def widget(cls, r, _class="action-lnk"):
+    def widget(cls, r, label="Anonymize", _class="action-lnk"):
         """
             Render an action item (link or button) to anonymize the
             target record of an S3Request, which can be embedded in
             the record view
 
             @param r: the S3Request
+            @param label: The label for the action item
             @param _class: HTML class for the action item
 
             @returns: the action item (a HTML helper instance), or an empty
@@ -410,10 +411,14 @@ class S3AnonymizeWidget(object):
                                            representation = "json",
                                            ),
                           }
+        next_url = resource.get_config("anonymize_next")
+        if next_url:
+            script_options["nextURL"] = next_url
         cls.inject_script(widget_id, script_options)
 
         # Action button
-        action_button = A(T("Anonymize"), _class="anonymize-btn")
+        translated_label = T(label)
+        action_button = A(translated_label, _class="anonymize-btn")
         if _class:
             action_button.add_class(_class)
 
@@ -443,7 +448,7 @@ class S3AnonymizeWidget(object):
                          _class = "hide anonymize-success",
                          ),
                      _class = "anonymize-dialog hide",
-                     _title = T("Anonymize"),
+                     _title = translated_label,
                      )
 
         # Assemble widget
@@ -472,7 +477,7 @@ class S3AnonymizeWidget(object):
         keys = session_s3.anonymize
         if keys is None:
             session_s3.anonymize = keys = {}
-        key = keys[widget_id] = str(uuid.uuid4())
+        key = keys[widget_id] = str(uuid4())
 
         return key
 
