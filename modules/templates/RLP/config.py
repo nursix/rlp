@@ -1367,13 +1367,13 @@ def config(settings):
                 field.writable = False
         else:
             workflow = {#"REQ": ("REQ", "APPR", "DECL", "CANC"),
-                        "APPR": ("APPR", "CANC", "IMPL"),
-                        "IMPL": ("IMPL", "CANC",),
+                        "APPR": ("APPR", "CANC", "IMPL", "NVLD"),
+                        "IMPL": ("IMPL", "CANC", "NVLD"),
                         }
             if current.auth.s3_has_role("COORDINATOR"):
-                workflow["REQ"] = ("REQ", "APPR", "DECL")
+                workflow["REQ"] = ("REQ", "APPR", "DECL", "NVLD")
             else:
-                workflow["REQ"] = ("REQ", "CANC")
+                workflow["REQ"] = ("REQ", "CANC", "NVLD")
             status = record.status
             next_status = workflow.get(status)
 
@@ -1467,6 +1467,7 @@ def config(settings):
                                "DECL": "#303030",
                                "CANC": "#d0d0d0",
                                "IMPL": "#40879c",
+                               "NVLD": "#333333",
                                },
                     }
 
@@ -1484,6 +1485,7 @@ def config(settings):
                             TR(represent("DECL"), T("Declined by coordinator/volunteer")),
                             TR(represent("CANC"), T("Cancelled by requesting organisation or volunteer")),
                             TR(represent("IMPL"), T("Deployment carried out")),
+                            TR(represent("NVLD"), T("Invalid Record")),
                             )
 
             field.comment = DIV(DIV(status_help,
@@ -1556,7 +1558,9 @@ def config(settings):
                 r.component.load()
                 record = r.component._rows[0]
             else:
+                r.component.add_filter(FS("status") != "NVLD")
                 record = None
+
             delegation_workflow(r.component.table, record, person_id=r.id)
 
             # Determine earliest start date
@@ -1690,9 +1694,9 @@ def config(settings):
                 #    title = T("Current Requests")
                 #    orderby = "hrm_delegation.date"
                 elif workflow == "o":
-                    # Obsolete (past, cancelled or implemented)
+                    # Obsolete (past, cancelled, implemented or invalid)
                     query = (FS("end_date") < today) | \
-                            (FS("status").belongs(("DECL", "RJCT", "CANC", "IMPL")))
+                            (FS("status").belongs(("DECL", "RJCT", "CANC", "IMPL", "NVLD")))
                     title = T("Archive")
                     orderby = "hrm_delegation.end_date desc"
                 else:
@@ -1704,6 +1708,11 @@ def config(settings):
                 if status_opts:
                     query &= FS("status").belongs(status_opts)
                 r.resource.add_filter(query)
+
+            elif r.method != "report":
+                status_opts = ("REQ", "APPR", "DECL", "CANC", "IMPL")
+                if not r.id:
+                    r.resource.add_filter(FS("status") != "NVLD")
 
             multiple_orgs = delegation_read_multiple_orgs()[0]
 
@@ -1732,9 +1741,11 @@ def config(settings):
                                               if opt[0] in status_opts
                                               ]
                     if len(status_filter_opts) > 1:
+                        #default = ["APPR", "IMPL"] if r.method == "report" else None
                         filter_widgets.insert(0,
                             S3OptionsFilter("status",
                                             options = OrderedDict(status_filter_opts),
+                                            #default = default,
                                             sort = False,
                                             cols = 3,
                                             ))
