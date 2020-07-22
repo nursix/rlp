@@ -768,6 +768,7 @@ def config(settings):
                     (T("Area Served"), "location"),
                     #(T("Offices"), "office"),
                     (T("Key Locations"), "facility"),
+                    (T("Documents"), "document"),
                     (T("Volunteers"), "human_resource"),
                     ]
             rheader_tabs = s3_rheader_tabs(r, tabs)
@@ -1061,6 +1062,71 @@ $('.copy-link').click(function(e){
     settings.auth.remove_role = auth_remove_role
 
     # -------------------------------------------------------------------------
+    def auth_user_ondisable(user_id):
+        """
+            If a Volunteer is disabled then:
+                - remove their Organisation affiliation (if-any)
+                - move them to Inactives
+        """
+
+        db = current.db
+
+        # Are they a Volunteer?
+        gtable = db.auth_group
+        mtable = db.auth_membership
+        query = (gtable.uuid.belongs(("RESERVE", "VOLUNTEER"))) & \
+                (gtable.id == mtable.group_id) & \
+                (mtable.user_id == user_id)
+        volunteer = db(query).select(mtable.id,
+                                     limitby = (0, 1)
+                                     ).first()
+        if not volunteer:
+            # Nothing to do
+            return
+
+        auth = current.auth
+        s3db = current.s3db
+
+        # Lookup person_id
+        ltable = s3db.pr_person_user
+        ptable = s3db.pr_person
+        query = (ltable.user_id == user_id) & \
+                (ltable.pe_id == ptable.pe_id)
+        person = db(query).select(ptable.id,
+                                  limitby = (0, 1)
+                                  ).first()
+        person_id = person.id
+
+        # Remove Organisation Affiliation if-any
+        htable = s3db.hrm_human_resource
+        query = (htable.person_id == person_id) & \
+                (htable.deleted == False)
+        hr = db(query).select(htable.id,
+                              limitby = (0, 1)
+                              ).first()
+        if hr:
+            resource = s3db.resource("hrm_human_resource", id = hr.id)
+            resource.delete()
+            db(db.auth_user.id == user_id).update(organisation_id = None)
+            auth.s3_withdraw_role(user_id, "VOLUNTEER", for_pe=[])
+
+        # Move to Inactives
+
+        # Update Tag
+        ttable = s3db.pr_person_tag
+        query = (ttable.person_id == person_id) & \
+                (ttable.tag == "reserve")
+        db(query).update(value = 0)
+
+        # Set Realm to Inactives Forum
+        ftable = s3db.pr_forum
+        forum = db(ftable.name == "Inactives").select(ftable.pe_id,
+                                                      limitby = (0, 1)
+                                                      ).first()
+        realm_entity = forum.pe_id
+        auth.set_realm_entity("pr_person", person_id, entity=realm_entity, force_update=True)
+
+    # -------------------------------------------------------------------------
     def customise_auth_user_resource(r, tablename):
         """
             Hook in custom auth_user_register_onaccept for use when Agency/Existing Users are Approved
@@ -1069,6 +1135,7 @@ $('.copy-link').click(function(e){
         from templates.CCC.controllers import auth_user_register_onaccept
 
         current.s3db.configure("auth_user",
+                               ondisable = auth_user_ondisable,
                                register_onaccept = auth_user_register_onaccept,
                                )
 
@@ -1243,7 +1310,7 @@ $('.copy-link').click(function(e){
 
                     list_fields = r.resource.get_config("list_fields")
                     list_fields.append((T("Consent"), "consent"))
-                if r.method != "import" and r.http == "POST":
+                if r.http == "POST" and r.method not in ("import", "deduplicate"):
                     post_vars = r.post_vars
                     if "selected" in post_vars:
                         # Bulk Action 'Anonymize' has been selected
@@ -1455,8 +1522,14 @@ $('.copy-link').click(function(e){
         else:
             f.readable = f.writable = True
 
+        if r.controller == "doc":
+            create_next = URL(args="datalist")
+        else:
+            # Org Component Tab
+            create_next = None
+
         s3db.configure("doc_document",
-                       create_next = URL(args="datalist"),
+                       create_next = create_next,
                        crud_form = S3SQLCustomForm("organisation_id",
                                                    (T("Type"), "document_type.value"),
                                                    (T("Document Name"), "name"),
@@ -1908,7 +1981,7 @@ $('.copy-link').click(function(e){
             else:
                 result = True
 
-            if r.method != "import" and r.http == "POST":
+            if r.http == "POST" and r.method not in ("import", "deduplicate"):
                 post_vars = r.post_vars
                 if "selected" in post_vars:
                     # Bulk Action 'Message' has been selected
@@ -3075,7 +3148,19 @@ $('.copy-link').click(function(e){
                 r.resource.add_filter(rfilter)
 
             if r.id:
-                if r.component_name == "location":
+                if r.component_name == "document":
+                    r.method = "datalist"
+                    # Filter out attachments
+                    ttable = current.s3db.project_task
+                    # @ToDo: Optimise list
+                    tasks = current.db(ttable.id > 0).select(ttable.doc_id)
+                    tasks = [t.doc_id for t in tasks]
+                    from s3 import FS
+                    query = (FS("document.doc_id") == None) | \
+                            ~(FS("document.doc_id").belongs(tasks))
+                    r.resource.add_component_filter("document", query)
+
+                elif r.component_name == "location":
                     from s3 import S3LocationSelector
                     s3db.org_organisation_location.location_id.widget = S3LocationSelector(levels = ("L3", "L4"),
                                                                                            required_levels = ("L3",),
@@ -3090,7 +3175,7 @@ $('.copy-link').click(function(e){
                                                   ],
                                    )
 
-            elif r.method != "import" and r.http == "POST":
+            elif r.http == "POST" and r.method not in ("import", "deduplicate"):
                 post_vars = r.post_vars
                 if "selected" in post_vars:
                     # Bulk Action 'Message' has been selected
@@ -4214,7 +4299,7 @@ $('.copy-link').click(function(e){
                                                                                                        ],
                                                                                         )
 
-                elif r.method != "import" and r.http == "POST":
+                elif r.http == "POST" and r.method not in ("import", "deduplicate"):
                     post_vars = r.post_vars
                     if "selected" in post_vars:
                         # Bulk Action 'Message' has been selected
@@ -4274,10 +4359,11 @@ $('.copy-link').click(function(e){
                     resource.add_filter(rfilter)
 
                     gtable = s3db.gis_location
-                    districts = current.db((gtable.level == "L3") & (gtable.L2 == "Cumbria")).select(gtable.id,
+                    districts = current.db((gtable.level == "L3") & (gtable.L2 == "Cumbria")).select(#gtable.id,
                                                                                                      gtable.name,
                                                                                                      cache = s3db.cache)
-                    districts = {d.id:d.name for d in districts}
+                    #districts = {d.id:d.name for d in districts}
+                    districts = {d.name:d.name for d in districts}
 
                     list_fields = ["first_name",
                                    "middle_name",
@@ -4365,7 +4451,7 @@ $('.copy-link').click(function(e){
                                                    label = "",
                                                    _placeholder = T("Search"),
                                                    ),
-                                      S3OptionsFilter("person_location.location_id",
+                                      S3OptionsFilter("person_location.location_id$L3",
                                                       label = T("Locations Served"),
                                                       options = districts,
                                                       ),
@@ -4607,26 +4693,26 @@ $('.copy-link').click(function(e){
     settings.customise_pr_person_location_resource = customise_pr_person_location_resource
 
     # -------------------------------------------------------------------------
-    def project_task_postprocess(form):
+    def project_task_postprocess_async(task_id,
+                                       subject,
+                                       message,
+                                       person_ids = None,
+                                       hr_ids = None,
+                                       organisation_ids = None,
+                                       person_item_id = None,
+                                       organisation_id = None,
+                                       ):
         """
+            Async part of postprocess
+
             When a Task is created:
                 * Duplicate Message if needs to be accessible to multiple Organisations
                 * Set Realm Entity
                 * Send Email
         """
 
-        if form.record:
-            # Update
-            return
-
         public_url = settings.get_base_public_url()
 
-        form_vars_get = form.vars.get
-        task_id = form_vars_get("id")
-
-        subject = form_vars_get("name")
-
-        message = form_vars_get("description")
         if message is None:
             message = ""
         else:
@@ -4668,20 +4754,8 @@ $('.copy-link').click(function(e){
                 attachments.append(Mail.Attachment(os_path_join(uploadfolder, filename), filename=origname))
 
         # Check what kind of message this is
-        get_vars_get = current.request.get_vars.get
-
-        person_ids = get_vars_get("person_ids")
         if person_ids is not None:
             # Sending to a list of People from the Bulk Action
-
-            # Retrieve list from the session
-            session = current.session
-            person_ids = session.s3.get("ccc_message_person_ids")
-            if person_ids is None:
-                session.warning = current.T("No people selected to send notifications to!")
-                return
-            # Clear from session
-            del session.s3["ccc_message_person_ids"]
 
             auth = current.auth
             user = auth.user
@@ -4787,18 +4861,8 @@ $('.copy-link').click(function(e){
 
             return
 
-        hr_ids = get_vars_get("hr_ids")
         if hr_ids is not None:
             # Sending to a list of HRs from the Bulk Action
-
-            # Retrieve list from the session
-            session = current.session
-            hr_ids = session.s3.get("ccc_message_hr_ids")
-            if hr_ids is None:
-                session.warning = current.T("No people selected to send notifications to!")
-                return
-            # Clear from session
-            del session.s3["ccc_message_hr_ids"]
 
             auth = current.auth
             user = auth.user
@@ -4942,8 +5006,7 @@ $('.copy-link').click(function(e){
                     (system_name,
                      fullname,
                      )
-
-        organisation_ids = get_vars_get("o")
+        
         if organisation_ids is not None:
             # Sending to a list of Organisations from the Bulk Action
             tag_table = s3db.project_task_tag
@@ -4963,8 +5026,6 @@ $('.copy-link').click(function(e){
                              tag = "to",
                              value = "Organisation(s)",
                              )
-
-            organisation_ids = organisation_ids.split(",")
 
             # Lookup the ORG_ADMINs
             gtable = db.auth_group
@@ -5041,7 +5102,6 @@ $('.copy-link').click(function(e){
                                  )
             return
 
-        person_item_id = get_vars_get("person_item_id")
         if person_item_id is not None:
             # Sending to a Donor
 
@@ -5105,7 +5165,8 @@ $('.copy-link').click(function(e){
             return
             
         # Use the Organisation we request or fallback to the User's Organisation
-        organisation_id = get_vars_get("organisation_id", user.organisation_id)
+        if organisation_id is None:
+            organisation_id = user.organisation_id
 
         tag_table = s3db.project_task_tag
 
@@ -5185,6 +5246,102 @@ $('.copy-link').click(function(e){
                        message = message,
                        attachments = attachments,
                        )
+
+    settings.tasks.project_task_postprocess_async = project_task_postprocess_async
+
+    # -------------------------------------------------------------------------
+    def project_task_postprocess(form):
+        """
+            Read environment to pass to async task
+        """
+
+        if form.record:
+            # Update
+            return
+
+        session = current.session
+
+        form_vars_get = form.vars.get
+        task_id = form_vars_get("id")
+        subject = form_vars_get("name")
+        message = form_vars_get("description")
+
+        # Check what kind of message this is
+        get_vars_get = current.request.get_vars.get
+
+        person_ids = get_vars_get("person_ids")
+        if person_ids is not None:
+            # Retrieve list from the session
+            person_ids = session.s3.get("ccc_message_person_ids")
+            # Send async
+            current.s3task.run_async("settings_task",
+                                     args = ["project_task_postprocess_async"],
+                                     vars = {"task_id": task_id,
+                                             "subject": subject,
+                                             "message": message,
+                                             "person_ids": person_ids,
+                                             }
+                                     )
+            # Clear from session
+            del session.s3["ccc_message_person_ids"]
+
+        else:
+            hr_ids = get_vars_get("hr_ids")
+            if hr_ids is not None:
+                # Retrieve list from the session
+                hr_ids = session.s3.get("ccc_message_hr_ids")
+                # Send async
+                current.s3task.run_async("settings_task",
+                                         args = ["project_task_postprocess_async"],
+                                         vars = {"task_id": task_id,
+                                                 "subject": subject,
+                                                 "message": message,
+                                                 "hr_ids": hr_ids,
+                                                 }
+                                         )
+                # Clear from session
+                del session.s3["ccc_message_hr_ids"]
+
+            else:
+                organisation_ids = get_vars_get("o")
+                if organisation_ids is not None:
+                    # @ToDo: Switch to using Session?
+                    organisation_ids = organisation_ids.split(",")
+                    # Send async
+                    current.s3task.run_async("settings_task",
+                                             args = ["project_task_postprocess_async"],
+                                             vars = {"task_id": task_id,
+                                                     "subject": subject,
+                                                     "message": message,
+                                                     "organisation_ids": organisation_ids,
+                                                     }
+                                             )
+
+                else:
+                    person_item_id = get_vars_get("person_item_id")
+                    if person_item_id is not None:
+                        # Send async
+                        current.s3task.run_async("settings_task",
+                                                 args = ["project_task_postprocess_async"],
+                                                 vars = {"task_id": task_id,
+                                                         "subject": subject,
+                                                         "message": message,
+                                                         "person_item_id": person_item_id,
+                                                         }
+                                                 )
+
+                    else:
+                        # Send async
+                        current.s3task.run_async("settings_task",
+                                                 args = ["project_task_postprocess_async"],
+                                                 vars = {"task_id": task_id,
+                                                         "subject": subject,
+                                                         "message": message,
+                                                         "organisation_id": get_vars_get("organisation_id"),
+                                                         }
+                                                 )
+
+        session.confirmation = T("Message submitted")
 
     # -------------------------------------------------------------------------
     def customise_project_task_resource(r, tablename):
