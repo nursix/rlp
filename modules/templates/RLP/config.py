@@ -127,6 +127,8 @@ def config(settings):
     settings.pr.separate_name_fields = 2
     settings.pr.name_format= "%(last_name)s, %(first_name)s"
 
+    settings.pr.availability_json_rules = True
+
     # -------------------------------------------------------------------------
     settings.hrm.record_tab = False
     settings.hrm.staff_experience = False
@@ -703,6 +705,13 @@ def config(settings):
                                           "filterby": {"type": 1},
                                           "multiple": False,
                                           },
+                            # All phone numbers as a single "phonenumber" component
+                            pr_contact = {"name": "phonenumber",
+                                          "joinby": "pe_id",
+                                          "filterby": {
+                                            "contact_method": ("SMS", "HOME_PHONE", "WORK_PHONE"),
+                                          },
+                                         },
                             )
 
         s3db.add_components("pr_person",
@@ -905,6 +914,48 @@ def config(settings):
     settings.customise_pr_person_resource = customise_pr_person_resource
 
     # -------------------------------------------------------------------------
+    def customise_volunteer_availability_fields(r):
+        """
+            Customise availability fields in volunteer form
+
+            @param r: the current S3Request
+        """
+
+        from s3 import S3WeeklyHoursWidget, s3_text_represent
+
+        avtable = current.s3db.pr_person_availability
+        is_profile = r.controller == "default"
+
+        # Enable hours/week
+        field = avtable.hours_per_week
+        field.readable = field.writable = True
+
+        # Configure schedule_json
+        field = avtable.schedule_json
+        field.readable = field.writable = True
+        if is_profile:
+            # Add intro text for widget
+            field.widget = S3WeeklyHoursWidget(intro=T("Please mark all times when you are generally available during the week, click boxes to select/deselect hours individually or hold the left mouse button pressed and move over the boxes to select/deselect multiple."))
+        field.represent = S3WeeklyHoursWidget.represent
+
+        # Configure availability comments
+        field = avtable.comments
+        field.label = T("Availability Comments")
+        field.represent = lambda v: s3_text_represent(v,
+                                        lines = 8 if r.record else 5,
+                                        _class = "avcomments",
+                                        )
+        if is_profile:
+            # Add tooltip for availability comments
+            field.comment = DIV(_class = "tooltip",
+                                _title = "%s|%s" % (T("Availability Comments"),
+                                                    T("Use this field to indicate e.g. vacation dates or other information with regard to your availability to facilitate personnel planning"),
+                                                    ),
+                                )
+        else:
+            field.comment = None
+
+    # -------------------------------------------------------------------------
     def volunteer_list_fields(r, coordinator=False, name_fields=None):
         """
             Determine fields for volunteer list
@@ -924,8 +975,10 @@ def config(settings):
                        # name
                        "occupation_type_person.occupation_type_id",
                        (T("Hours/Wk"), "availability.hours_per_week"),
-                       "availability.schedule",
-                       (T("Mobile Phone"), "phone.value"),
+                       "availability.schedule_json",
+                       "availability.comments",
+                       #(T("Mobile Phone"), "phone.value"),
+                       (T("Phone"), "phonenumber.value"),
                        # email
                        "current_address.location_id$addr_postcode",
                        (T("Place of Residence"), "current_address.location_id$L3"),
@@ -956,11 +1009,15 @@ def config(settings):
 
         # Status, current deployment and account info as last columns
         if coordinator:
+            from s3 import S3DateTime
+            current.s3db.auth_user.created_on.represent = S3DateTime.datetime_represent
+
             list_fields.extend([
                 "volunteer_record.status",
                 (T("Current Deployment"), "ongoing_deployment.organisation_id"),
                 (T("Deployed until"), "ongoing_deployment.end_date"),
                 (T("has Account"), "has_account"),
+                (T("Registered on"), "user.created_on"),
                 ])
 
         return list_fields
@@ -1092,7 +1149,8 @@ def config(settings):
                                ),
                 (T("Occupation / Speciality"), "person_details.occupation"),
                 "availability.hours_per_week",
-                "availability.schedule",
+                "availability.schedule_json",
+                "availability.comments",
                 "volunteer_record.comments",
                 ])
 
@@ -1118,6 +1176,8 @@ def config(settings):
             resource = r.resource
             table = resource.table
 
+            controller = r.controller
+
             from gluon import IS_NOT_EMPTY
             from s3 import (IS_ONE_OF,
                             IS_PERSON_GENDER,
@@ -1130,7 +1190,6 @@ def config(settings):
                             S3TextFilter,
                             StringTemplateParser,
                             s3_get_filter_opts,
-                            s3_text_represent,
                             )
 
             # Make last name mandatory
@@ -1151,22 +1210,8 @@ def config(settings):
                                               zero = None,
                                               )
 
-            # Enable weekly hours
-            avtable = s3db.pr_person_availability
-            field = avtable.hours_per_week
-            field.readable = field.writable = True
-            field = avtable.schedule
-            field.readable = field.writable = True
-            field.represent = lambda v: \
-                              s3_text_represent(v,
-                                                lines = 5 if r.record else 3,
-                                                _class = "availability-times",
-                                                )
-            field.comment = DIV(_class = "tooltip",
-                                _title = "%s|%s" % (T("Availability Schedule"),
-                                                    T("Specify days/hours like: Monday 10-12; Tuesday 10-12 and 14-19; Friday 13-15"),
-                                                    ),
-                                )
+            # Availability
+            customise_volunteer_availability_fields(r)
 
             # Hide map selector in address
             atable = s3db.pr_address
@@ -1187,7 +1232,7 @@ def config(settings):
             keys = StringTemplateParser.keys(settings.get_pr_name_format())
             name_fields = [fn for fn in keys if fn in NAMES]
 
-            if r.controller == "vol":
+            if controller == "vol":
                 # Volunteer perspective (vol/person)
 
                 record = r.record
@@ -1358,29 +1403,39 @@ def config(settings):
                         S3OptionsFilter("occupation_type_person.occupation_type_id",
                                         options = lambda: s3_get_filter_opts("pr_occupation_type"),
                                         ),
+                        S3LocationFilter("current_address.location_id",
+                                         label = T("Place of Residence"),
+                                         levels = ("L2", "L3"),
+                                         ),
                         RLPAvailabilityFilter("delegation.date",
                                               label = T("Available"),
                                               #hide_time = True,
                                               ),
-                        S3LocationFilter("current_address.location_id",
-                                         label = T("Place of Residence"),
-                                         levels = ("L2", "L3"),
-                                         hidden = True,
-                                         ),
+                        S3OptionsFilter("availability.days_of_week",
+                                        label = T("On Weekdays"),
+                                        options = OrderedDict((
+                                                    (1, T("Mon##weekday")),
+                                                    (2, T("Tue##weekday")),
+                                                    (3, T("Wed##weekday")),
+                                                    (4, T("Thu##weekday")),
+                                                    (5, T("Fri##weekday")),
+                                                    (6, T("Sat##weekday")),
+                                                    (0, T("Sun##weekday")),
+                                                    )),
+                                        cols = 7,
+                                        sort = False,
+                                        ),
                         S3RangeFilter("availability.hours_per_week",
-                                      hidden = True,
                                       ),
                         S3OptionsFilter("competency.skill_id",
                                         label = T("Skills / Resources"),
                                         options = lambda: s3_get_filter_opts("hrm_skill"),
-                                        hidden = True,
                                         cols = 2,
                                         ),
                         S3AgeFilter("date_of_birth",
                                     label = T("Age"),
                                     minimum = 12,
                                     maximum = 90,
-                                    hidden = True,
                                     ),
                         ]
 
@@ -1422,7 +1477,7 @@ def config(settings):
                        r.interactive and r.method is None and not r.component_id:
                         r.method = "organize"
 
-            elif r.controller == "default":
+            elif controller == "default":
                 # Personal profile (default/person)
                 if not r.component:
                     # Custom Form
@@ -1439,7 +1494,8 @@ def config(settings):
                                         "volunteer_record.end_date",
                                         "volunteer_record.status",
                                         "availability.hours_per_week",
-                                        "availability.schedule",
+                                        "availability.schedule_json",
+                                        "availability.comments",
                                         "volunteer_record.comments",
                                         ])
 

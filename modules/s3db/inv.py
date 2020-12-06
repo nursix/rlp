@@ -1983,7 +1983,7 @@ $.filterOptionsS3({
 
         # Return the total volume
         if quantity is not None and volume is not None:
-            return quantity * volume
+            return round(quantity * volume, 3)
         else:
             # Unknown
             return current.messages["NONE"]
@@ -2014,7 +2014,7 @@ $.filterOptionsS3({
 
         # Return the total weight
         if quantity is not None and weight is not None:
-            return quantity * weight
+            return round(quantity * weight, 3)
         else:
             # Unknown
             return current.messages["NONE"]
@@ -2731,7 +2731,7 @@ $.filterOptionsS3({
                     record.site_id,
                     rtable.recv_ref,
                     )
-            db(rtable.id == record_id).update(recv_ref=code)
+            db(rtable.id == record_id).update(recv_ref = code)
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -2999,7 +2999,7 @@ $.filterOptionsS3({
         p_id_field = ptable.id
         p_qty_field = ptable.quantity
         pack_qty = db(p_id_field == item_pack_id).select(p_qty_field,
-                                                         limitby=(0, 1)
+                                                         limitby = (0, 1)
                                                          ).first().quantity
         quantity = quantity * pack_qty
 
@@ -3020,7 +3020,7 @@ $.filterOptionsS3({
         for record in rows:
             # How much of this supply_item is required per kit?
             pack_qty = db(p_id_field == record.item_pack_id).select(p_qty_field,
-                                                                    limitby=(0, 1)
+                                                                    limitby = (0, 1)
                                                                     ).first().quantity
             one_kit = record.quantity * pack_qty
 
@@ -3033,7 +3033,7 @@ $.filterOptionsS3({
                                         )
             for wh_item in wh_items:
                 pack_qty = db(p_id_field == wh_item.item_pack_id).select(p_qty_field,
-                                                                         limitby=(0, 1)
+                                                                         limitby = (0, 1)
                                                                          ).first().quantity
                 amount = wh_item.quantity * pack_qty
                 stock_amount += amount
@@ -3050,7 +3050,9 @@ $.filterOptionsS3({
 
         # @ToDo: Save the results for the onaccept?
 
-        if max_kits < quantity:
+        if max_kits is None:
+            form.errors.item_id = current.T("This kit hasn't got any Kit Items defined")
+        elif max_kits < quantity:
             form.errors.quantity = current.T("You can only make %d kit(s) with the available stock") % \
                                         int(max_kits)
 
@@ -3092,7 +3094,7 @@ $.filterOptionsS3({
         p_id_field = ptable.id
         p_qty_field = ptable.quantity
         pack_qty = db(p_id_field == item_pack_id).select(p_qty_field,
-                                                         limitby=(0, 1)
+                                                         limitby = (0, 1)
                                                          ).first().quantity
         quantity = quantity * pack_qty
 
@@ -3121,7 +3123,7 @@ $.filterOptionsS3({
         for record in rows:
             # How much of this supply_item is required per kit?
             pack_qty = db(p_id_field == record.item_pack_id).select(p_qty_field,
-                                                                    limitby=(0, 1)
+                                                                    limitby = (0, 1)
                                                                     ).first().quantity
             one_kit = record.quantity * pack_qty
 
@@ -3144,7 +3146,7 @@ $.filterOptionsS3({
             for wh_item in wh_items:
                 # Get the pack_qty
                 pack_qty = db(p_id_field == wh_item.item_pack_id).select(p_qty_field,
-                                                                         limitby=(0, 1)
+                                                                         limitby = (0, 1)
                                                                          ).first().quantity
                 # How many of this item can we use for these kits?
                 amount = wh_item.quantity * pack_qty
@@ -4847,7 +4849,7 @@ def inv_item_total_weight(row):
     if weight is None:
         return current.messages["NONE"]
     else:
-        return quantity * weight
+        return round(quantity * weight, 3)
 
 # -----------------------------------------------------------------------------
 def inv_item_total_volume(row):
@@ -4883,7 +4885,7 @@ def inv_item_total_volume(row):
     if volume is None:
         return current.messages["NONE"]
     else:
-        return quantity * volume
+        return round(quantity * volume, 3)
 
 # -----------------------------------------------------------------------------
 def inv_stock_movements(resource, selectors, orderby):

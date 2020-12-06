@@ -4831,14 +4831,14 @@ class PRAvailabilityModel(S3Model):
                          #4: T("Yearly"),
                          }
 
-        days_of_week = {0: T("Sunday"),
-                        1: T("Monday"),
-                        2: T("Tuesday"),
-                        3: T("Wednesday"),
-                        4: T("Thursday"),
-                        5: T("Friday"),
-                        6: T("Saturday"),
-                        }
+        days_of_week = ((0, T("Sunday")),
+                        (1, T("Monday")),
+                        (2, T("Tuesday")),
+                        (3, T("Wednesday")),
+                        (4, T("Thursday")),
+                        (5, T("Friday")),
+                        (6, T("Saturday")),
+                        )
 
         tablename = "pr_date_formula"
         define_table(tablename,
@@ -4853,9 +4853,12 @@ class PRAvailabilityModel(S3Model):
                            ),
                      Field("rate", "integer"), # Repeat Frequency
                      Field("days_of_week", "list:integer",
-                           represent = S3Represent(options = days_of_week),
-                           requires = IS_IN_SET((0, 1, 2, 3, 4, 5, 6),
+                           represent = S3Represent(options = dict(days_of_week),
+                                                   multiple = True,
+                                                   ),
+                           requires = IS_IN_SET(days_of_week,
                                                 multiple = True,
+                                                sort = False,
                                                 ),
                            ),
                      *s3_meta_fields())
@@ -4960,7 +4963,6 @@ class PRAvailabilityModel(S3Model):
         # ---------------------------------------------------------------------
         # Person Availability
         #
-
         availability_options = \
             current.deployment_settings.get_pr_person_availability_options()
         if availability_options is None:
@@ -4991,6 +4993,23 @@ class PRAvailabilityModel(S3Model):
                            readable = False,
                            writable = False,
                            ),
+                     Field("schedule_json", "json",
+                           label = T("Availability Schedule"),
+                           widget = S3WeeklyHoursWidget(),
+                           readable = False,
+                           writable = False,
+                           ),
+                     Field("days_of_week", "list:integer",
+                           represent = S3Represent(options = dict(days_of_week),
+                                                   multiple = True,
+                                                   ),
+                           requires = IS_IN_SET(days_of_week,
+                                                multiple = True,
+                                                sort = False,
+                                                ),
+                           readable = False,
+                           writable = False,
+                           ),
                      #s3_date("start_date",
                      #        label = T("Start Date"),
                      #        ),
@@ -5015,6 +5034,7 @@ class PRAvailabilityModel(S3Model):
                   #        availability records per person (e.g. include
                   #        start/end dates and location_id)
                   deduplicate = S3Duplicate(primary = ("person_id",)),
+                  onaccept = self.availability_onaccept,
                   )
 
         self.add_components(tablename,
@@ -5041,9 +5061,155 @@ class PRAvailabilityModel(S3Model):
                   )
 
         # ---------------------------------------------------------------------
+        # Rules for individual times of availability
+        #
+        # - flat model to support use with organizer (rrule) and filters
+        # - generated onaccept from pr_person_availability.schedule_json
+        #
+        # TODO consider combining with pr_person_slot
+        # TODO make person component
+        #
+        freq_options = (("DAILY", T("Daily")),
+                        ("WEEKLY", T("Weekly")),
+                        # TODO require additional fields (see rrule):
+                        #("MONTHLY", T("Monthly")),
+                        #("YEARLY", T("Yearly")),
+                        )
+
+        tablename = "pr_person_availability_rule"
+        define_table(tablename,
+                     self.pr_person_id(),
+                     Field("availability_id", "reference pr_person_availability",
+                           requires = IS_ONE_OF(db, "pr_person_availability.id"),
+                           readable = False,
+                           writable = False,
+                           ),
+                     Field("freq",
+                           default = "WEEKLY",
+                           label = T("Repeat"),
+                           requires = IS_IN_SET(freq_options, sort=False),
+                           represent = S3Represent(options=dict(freq_options)),
+                           ),
+                     Field("interv", "integer",
+                           default = 1,
+                           label = T("Interval"),
+                           requires = IS_INT_IN_RANGE(0),
+                           ),
+                     Field("weekday", "list:integer",
+                           represent = S3Represent(options = dict(days_of_week),
+                                                   multiple = True,
+                                                   ),
+                           requires = IS_IN_SET(days_of_week,
+                                                multiple = True,
+                                                sort = False,
+                                                ),
+                           ),
+                     s3_date(),
+                     s3_date("end_date"),
+                     Field("start_time", "time",
+                           ),
+                     Field("end_time", "time",
+                           ),
+                     *s3_meta_fields())
+
+        # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
         return {}
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def availability_onaccept(form):
+        """
+            Onaccept routine for availability
+                - update availability rules from schedule_json
+                - update availability weekdays from schedule_json
+        """
+
+        # Get the record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        else:
+            return
+
+        db = current.db
+        s3db = current.s3db
+        table = s3db.pr_person_availability
+
+        if current.deployment_settings.get_pr_availability_json_rules():
+
+            rtable =  s3db.pr_person_availability_rule
+
+            availability = {"id": record_id}
+            missing = []
+
+            # Handle missing fields
+            for fn in ("person_id", "schedule_json"):
+                if fn in form_vars:
+                    availability[fn] = form_vars[fn]
+                else:
+                    missing.append(fn)
+            if missing and record_id:
+                row = db(table.id == record_id).select(*missing,
+                                                    limitby=(0, 1),
+                                                    ).first()
+                if row:
+                    for fn in missing:
+                        availability[fn] = row[fn]
+
+            # Delete existing rules
+            # TODO setting to terminate (=set end_date) rather than delete?
+            db(rtable.availability_id == record_id).delete()
+
+            # Rewrite rules
+            rules = availability["schedule_json"]
+            all_week = {0, 1, 2, 3, 4, 5, 6}
+            if rules:
+                dow = set()
+                freqopts = ("DAILY",
+                            "WEEKLY",
+                            #"MONTHLY",
+                            #"YEARLY",
+                            )
+                for rule in rules:
+
+                    # Frequency
+                    freq = rule.get("f")
+                    if freq not in freqopts:
+                        continue
+
+                    # Interval
+                    interv = rule.get("i", 1)
+                    if interv < 0:
+                        interv = 0 # = do not repeat
+
+                    if freq == "DAILY":
+                        dow = all_week
+                    else:
+                        # Days of Week
+                        weekday = [d for d in rule.get("d", []) if 0 <= d <= 6]
+                        dow |= set(weekday)
+
+                    # Start/end time tuples (h,m,s)
+                    start = (rule.get("s", []) + [0,0,0])[:3]
+                    end = (rule.get("e", []) + [0,0,0])[:3]
+
+                    data = {"person_id": availability["person_id"],
+                            "availability_id": record_id,
+                            "freq": freq,
+                            "interv": interv,
+                            "weekday": weekday,
+                            "start_time": datetime.time(*start),
+                            "end_time": datetime.time(*end),
+                            # TODO add start date (today)
+                            }
+                    rtable.insert(**data)
+            else:
+                # Without rules, the person is available on all days
+                dow = all_week
+
+            db(table.id == record_id).update(days_of_week=sorted(list(dow)))
 
 # =============================================================================
 class PRUnavailabilityModel(S3Model):
