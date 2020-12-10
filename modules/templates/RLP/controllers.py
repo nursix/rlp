@@ -4,7 +4,7 @@ import json
 from uuid import uuid4
 
 from gluon import A, BR, CRYPT, DIV, Field, H3, INPUT, \
-                  IS_EMPTY_OR,  IS_EXPR, IS_INT_IN_RANGE, IS_NOT_EMPTY, \
+                  IS_EMPTY_OR,  IS_EXPR, IS_INT_IN_RANGE, IS_LENGTH, IS_NOT_EMPTY, \
                   P, SQLFORM, URL, XML, current, redirect
 from gluon.storage import Storage
 
@@ -274,7 +274,26 @@ class register(S3CustomController):
 
         # Page title and intro text
         title = T("Volunteer Registration")
-        intro = T("Please fill in all relevant information for your deployment. To support the choice of suitable candidates we especially need information about your place of residence (postcode and town), your contact information (phone and email) and the weekly working time (hours per week) your are able to support.")
+
+        # Get intro text from CMS
+        db = current.db
+        s3db = current.s3db
+
+        ctable = s3db.cms_post
+        ltable = s3db.cms_post_module
+        join = ltable.on((ltable.post_id == ctable.id) & \
+                        (ltable.module == "auth") & \
+                        (ltable.resource == "user") & \
+                        (ltable.deleted == False))
+
+        query = (ctable.name == "SelfRegistrationIntro") & \
+                (ctable.deleted == False)
+        row = db(query).select(ctable.body,
+                                join = join,
+                                cache = s3db.cache,
+                                limitby = (0, 1),
+                                ).first()
+        intro = row.body if row else None
 
         # Form Fields
         formfields, required_fields, subheadings = self.formfields()
@@ -544,6 +563,8 @@ class register(S3CustomController):
                       # --------------------------------------------
                       s3db.gis_location_id("location_id",
                                            widget = S3LocationSelector(
+                                                       levels = ("L1", "L2", "L3"),
+                                                       required_levels = ("L1", "L2", "L3"),
                                                        show_address = False,
                                                        show_postcode = False,
                                                        show_map = False,
@@ -578,9 +599,10 @@ class register(S3CustomController):
                             label = T("Occupation / Speciality"),
                             comment = DIV(_class = "tooltip",
                                           _title = "%s|%s" % (T("Occupation / Speciality"),
-                                                              T("Specify your exact job designation"),
+                                                              T("Specify your exact job designation (max 128 characters)"),
                                                               ),
                                           ),
+                            requires = IS_EMPTY_OR(IS_LENGTH(128)),
                             ),
 
                       # --------------------------------------------
@@ -606,7 +628,7 @@ class register(S3CustomController):
                             ),
                       Field("schedule_json", "json",
                             label = T("Availability Schedule"),
-                            widget = S3WeeklyHoursWidget(intro=T("Please mark all times when you are generally available during the week, click boxes to select/deselect hours individually or hold the left mouse button pressed and move over the boxes to select/deselect multiple.")),
+                            widget = S3WeeklyHoursWidget(intro = ("pr", "person_availability", "HoursMatrixIntro"))
                             ),
                       Field("availability_comments", "text",
                             label = T("Availability Comments"),
@@ -653,6 +675,16 @@ class register(S3CustomController):
                        (18, T("Comments")),
                        (19, T("Privacy")),
                        )
+
+        # Geocoder
+        # @ToDo: Either move Address into LocationSelector or make a variant of geocoder.js to match these IDs
+        #s3 = current.response.s3
+        #s3.scripts.append("/%s/static/themes/RLP/js/geocoder.js" % r.application)
+        #s3.jquery_ready.append('''S3.rlp_GeoCoder("pr_address_location_id")''')
+        #s3.js_global.append('''i18n.location_found="%s"
+#i18n.location_not_found="%s"''' % (T("Location Found"),
+        #                           T("Location NOT Found"),
+        #                           ))
 
         return formfields, required_fields, subheadings
 
@@ -1199,5 +1231,34 @@ class verify_email(S3CustomController):
                                          )
         if not success:
             current.response.error = auth_messages.unable_send_email
+
+# =============================================================================
+class geocode(S3CustomController):
+    """
+        Custom Geocoder
+        - looks up Lat/Lon from Postcode &/or Address
+        - looks up Lx from Lat/Lon
+    """
+
+    def __call__(self):
+
+        gis = current.gis
+
+        post_vars_get = current.request.post_vars.get
+        postcode = post_vars_get("postcode")
+        address = post_vars_get("address")
+        if address:
+            full_address = "%s %s" %(postcode, address)
+        else:
+            full_address = postcode
+
+        latlon = gis.geocode(full_address)
+        if not isinstance(latlon, dict):
+            return None
+
+        results = gis.geocode_r(latlon["lat"], latlon["lon"])
+
+        current.response.headers["Content-Type"] = "application/json"
+        return json.dumps(results)
 
 # END =========================================================================

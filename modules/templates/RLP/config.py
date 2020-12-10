@@ -7,8 +7,10 @@ from collections import OrderedDict
 from gluon import current, redirect, URL, A, DIV, TABLE, TAG, TR
 from gluon.storage import Storage
 
-from s3 import FS, S3DateFilter, S3Represent, s3_fieldmethod, s3_fullname, s3_yes_no_represent
+from s3 import FS, IS_LOCATION, S3DateFilter, S3Represent, s3_fieldmethod, s3_fullname, s3_yes_no_represent
 from s3dal import original_tablename
+
+#from .rlpgeonames import rlp_GeoNames
 
 ALLOWED_FORMATS = ("html", "iframe", "popup", "aadata", "json", "xls", "pdf")
 
@@ -70,6 +72,10 @@ def config(settings):
     # Uncomment to show the Print control:
     # http://eden.sahanafoundation.org/wiki/UserGuidelines/Admin/MapPrinting
     #settings.gis.print_button = True
+
+    # Use custom geocoder (disabled until production-ready)
+    #if rlp_GeoNames.enable:
+    #    settings.gis.geocode_service = rlp_GeoNames
 
     # L10n settings
     # Languages used in the deployment (used for Language Toolbar, GIS Locations, etc)
@@ -935,8 +941,11 @@ def config(settings):
         field.readable = field.writable = True
         if is_profile:
             # Add intro text for widget
-            field.widget = S3WeeklyHoursWidget(intro=T("Please mark all times when you are generally available during the week, click boxes to select/deselect hours individually or hold the left mouse button pressed and move over the boxes to select/deselect multiple."))
-        field.represent = S3WeeklyHoursWidget.represent
+            field.widget = S3WeeklyHoursWidget(intro = ("pr", "person_availability", "HoursMatrixIntro"))
+        if r.representation == "xls":
+            field.represent = lambda v: S3WeeklyHoursWidget.represent(v, html=False)
+        else:
+            field.represent = S3WeeklyHoursWidget.represent
 
         # Configure availability comments
         field = avtable.comments
@@ -999,6 +1008,7 @@ def config(settings):
             # Email address
             list_fields.insert(-2, (T("Email"), "email.value"))
             if coordinator:
+                list_fields.append((T("Skills / Resources"), "competency.skill_id"))
                 # Office information
                 office = "volunteer_record.site_id$site_id:org_office"
                 list_fields.extend([
@@ -1213,10 +1223,15 @@ def config(settings):
             # Availability
             customise_volunteer_availability_fields(r)
 
-            # Hide map selector in address
+            # Configure Location Selector
             atable = s3db.pr_address
             field = atable.location_id
-            field.widget = S3LocationSelector(show_address = True,
+            field.requires = IS_LOCATION() # Mandatory
+            field.widget = S3LocationSelector(levels = ("L1", "L2", "L3"),
+                                              required_levels = ("L1", "L2", "L3"),
+                                              show_address = True,
+                                              show_postcode = True,
+                                              postcode_required = True,
                                               show_map = False,
                                               )
 
@@ -1534,24 +1549,35 @@ def config(settings):
                 output = standard_postp(r, output)
 
             if r.controller in ("vol", "default") and \
-               not r.component and r.record and \
-               r.method in (None, "update", "read") and \
+               not r.component and \
                isinstance(output, dict):
+                # Geocoder
+                #s3.scripts.append("/%s/static/themes/RLP/js/geocoder.js" % r.application)
+                #if r.record:
+                #    s3.jquery_ready.append('''S3.rlp_GeoCoder("sub_defaultaddress_defaultaddress_i_location_id_edit_0")''')
+                #else:
+                #    s3.jquery_ready.append('''S3.rlp_GeoCoder("sub_defaultaddress_defaultaddress_i_location_id_edit_none")''')
+                #s3.js_global.append('''i18n.location_found="%s"
+#i18n.location_not_found="%s"''' % (T("Location Found"),
+                #                   T("Location NOT Found"),
+                #                   ))
+                if r.record and \
+                   r.method in (None, "update", "read"):
 
-                # Custom CRUD buttons
-                if "buttons" not in output:
-                    buttons = output["buttons"] = {}
-                else:
-                    buttons = output["buttons"]
+                    # Custom CRUD buttons
+                    if "buttons" not in output:
+                        buttons = output["buttons"] = {}
+                    else:
+                        buttons = output["buttons"]
 
-                # Anonymize-button
-                from s3 import S3AnonymizeWidget
-                anonymize = S3AnonymizeWidget.widget(r,
-                                         _class="action-btn anonymize-btn")
+                    # Anonymize-button
+                    from s3 import S3AnonymizeWidget
+                    anonymize = S3AnonymizeWidget.widget(r,
+                                             _class="action-btn anonymize-btn")
 
-                # Render in place of the delete-button
-                buttons["delete_btn"] = TAG[""](anonymize,
-                                                )
+                    # Render in place of the delete-button
+                    buttons["delete_btn"] = TAG[""](anonymize,
+                                                    )
             return output
         s3.postp = custom_postp
 
@@ -2296,6 +2322,7 @@ def config(settings):
             if not volunteer_id:
                 list_fields[0:0] =  [(T("Pool"), "person_id$pool_membership.group_id"),
                                      "person_id",
+                                     "person_id$occupation_type_person.occupation_type_id",
                                      ]
             if multiple_orgs:
                 list_fields.insert(0, "organisation_id")

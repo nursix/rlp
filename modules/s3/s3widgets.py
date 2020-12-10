@@ -116,7 +116,6 @@ from .s3utils import *
 from .s3validators import *
 
 DEFAULT = lambda:None
-ogetattr = object.__getattribute__
 repr_select = lambda l: len(l.name) > 48 and "%s..." % l.name[:44] or l.name
 
 # Compact JSON encoding
@@ -2737,6 +2736,9 @@ class S3WeeklyHoursWidget(FormWidget):
             @param ticks: render tick marks every n hours (0/None=off)
             @param intro: optional intro text to display above the
                           matrix in order to explain the widget
+                          - if specified as tuple (module, resourcename, postname),
+                            the intro text will be attempted to retrieve from the
+                            CMS (requires CMS module to be enabled)
         """
 
         if daynames:
@@ -2784,6 +2786,31 @@ class S3WeeklyHoursWidget(FormWidget):
         self.inject_script(widget_id, options)
 
         intro = self.intro
+        if isinstance(intro, tuple):
+            if len(intro) == 3 and current.deployment_settings.has_module("cms"):
+
+                # Get intro text from CMS
+                db = current.db
+                s3db = current.s3db
+
+                ctable = s3db.cms_post
+                ltable = s3db.cms_post_module
+                join = ltable.on((ltable.post_id == ctable.id) & \
+                                (ltable.module == intro[0]) & \
+                                (ltable.resource == intro[1]) & \
+                                (ltable.deleted == False))
+
+                query = (ctable.name == intro[2]) & \
+                        (ctable.deleted == False)
+                row = db(query).select(ctable.body,
+                                       join = join,
+                                       cache = s3db.cache,
+                                       limitby = (0, 1),
+                                       ).first()
+                intro = row.body if row else None
+            else:
+                intro = None
+
         if intro:
             return TAG[""](DIV(intro, _class="wh-intro"),
                            widget,
@@ -2839,7 +2866,7 @@ class S3WeeklyHoursWidget(FormWidget):
 
     # -------------------------------------------------------------------------
     @classmethod
-    def represent(cls, rules, daynames=None):
+    def represent(cls, rules, daynames=None, html=True):
         """
             Represent a set of weekly time rules, as list of rules
             per weekday (HTML)
@@ -2849,6 +2876,7 @@ class S3WeeklyHoursWidget(FormWidget):
             @param daynames: override for default daynames, as dict
                              {daynumber: dayname}, with day number 0
                              meaning Sunday
+            @param html: produce HTML rather than text (overridable for e.g. XLS export)
 
             @returns: UL instance
         """
@@ -2893,7 +2921,8 @@ class S3WeeklyHoursWidget(FormWidget):
                     slots.append(slot)
                 slots_by_day[day] = slots
 
-        output = UL(_class="wh-schedule")
+        output = UL(_class="wh-schedule") if html else []
+
         for index in range(first_dow, first_dow + 7):
 
             day = index % 7
@@ -2905,10 +2934,14 @@ class S3WeeklyHoursWidget(FormWidget):
             else:
                 slotsrepr = "-"
 
-            output.append(LI(SPAN(dn[day], _class="wh-dayname"),
-                             slotsrepr,
-                             ))
-        return output
+            if html:
+                output.append(LI(SPAN(dn[day], _class="wh-dayname"),
+                                 slotsrepr,
+                                 ))
+            else:
+                output.append("%s: %s" % (dn[day], slotsrepr))
+
+        return output if html else "\n".join(output)
 
 # =============================================================================
 class S3EmbeddedComponentWidget(FormWidget):
@@ -4722,6 +4755,7 @@ class S3LocationSelector(S3Selector):
                  reverse_lx = False,
                  show_address = False,
                  show_postcode = None,
+                 postcode_required = None,
                  show_latlon = None,
                  latlon_mode = "decimal",
                  latlon_mode_toggle = True,
@@ -4757,6 +4791,7 @@ class S3LocationSelector(S3Selector):
             @param show_address: show a field for street address.
                                  If the parameter is set to a string then this is used as the label.
             @param show_postcode: show a field for postcode
+            @param postcode_required: postcode field is mandatory
             @param show_latlon: show fields for manual Lat/Lon input
             @param latlon_mode: (initial) lat/lon input mode ("decimal" or "dms")
             @param latlon_mode_toggle: allow user to toggle lat/lon input mode
@@ -4791,6 +4826,7 @@ class S3LocationSelector(S3Selector):
         self.reverse_lx = reverse_lx
         self.show_address = show_address
         self.show_postcode = show_postcode
+        self.postcode_required = postcode_required
         self.prevent_duplicate_addresses = prevent_duplicate_addresses
 
         if show_latlon is None:
@@ -4930,6 +4966,8 @@ class S3LocationSelector(S3Selector):
         request = current.request
         s3 = current.response.s3
 
+        #self.field = field
+
         # Is the location input required?
         requires = field.requires
         if requires:
@@ -5059,6 +5097,7 @@ class S3LocationSelector(S3Selector):
                                                   postcode,
                                                   settings.get_ui_label_postcode(),
                                                   hidden = not postcode,
+                                                  required = self.postcode_required,
                                                   )
 
         # Lat/Lon INPUTs
@@ -5709,6 +5748,7 @@ class S3LocationSelector(S3Selector):
                value,
                label,
                hidden = False,
+               required = False,
                _class = "string"):
         """
             Render a text input (e.g. address or postcode field)
@@ -5718,6 +5758,7 @@ class S3LocationSelector(S3Selector):
             @param value: the initial value for the input
             @param label: the label for the input
             @param hidden: render hidden
+            @param required: mark as required
 
             @return: a tuple (label, widget, id, hidden)
         """
@@ -5725,7 +5766,11 @@ class S3LocationSelector(S3Selector):
         input_id = "%s_%s" % (fieldname, name)
 
         if label and self.labels:
-            _label = LABEL("%s:" % label,
+            if required:
+                label = s3_required_label(label)
+            else:
+                label = "%s:" % label
+            _label = LABEL(label,
                            _for = input_id,
                            )
         else:
@@ -6320,12 +6365,7 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
                 return values, current.T("Location data required")
             return values, None
 
-        table = current.s3db.gis_location
         errors = {}
-        feature = None
-        onvalidation = None
-
-        msg = self.error_message
 
         # Check for valid Lat/Lon/WKT/Radius (if any)
         lat = values_get("lat")
@@ -6365,9 +6405,27 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
         elif radius == "":
             radius = None
 
+        # Lx Required?
+        required_levels = self._required_levels or []
+        for level in required_levels:
+            l = values_get(level)
+            if not l:
+                errors[level] = current.T("Location Hierarchy is Required!")
+                break
+
+        # Postcode Required?
+        postcode = values_get("postcode")
+        if not postcode and self.postcode_required:
+            errors["postcode"] = current.T("Postcode is Required!")
+
         if errors:
             error = "\n".join(s3_str(errors[fn]) for fn in errors)
             return (values, error)
+
+        table = current.s3db.gis_location
+        feature = None
+        onvalidation = None
+        msg = self.error_message
 
         specific = values_get("specific")
         location_id = values_get("id")
@@ -6382,7 +6440,6 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
             # Read other details
             parent = values_get("parent")
             address = values_get("address")
-            postcode = values_get("postcode")
 
         if parent or address or postcode or \
            wkt is not None or \
@@ -6613,6 +6670,10 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
         # Skip if location_id is None
         if location_id is None:
             return location_id, None
+
+        # Skip if the field is JSON type (e.g. during Registration)
+        #if self.field.type == "json":
+        #    return location_id, None
 
         db = current.db
         table = current.s3db.gis_location
