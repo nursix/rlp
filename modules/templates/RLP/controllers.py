@@ -4,16 +4,19 @@ import json
 from uuid import uuid4
 
 from gluon import A, BR, CRYPT, DIV, Field, H3, INPUT, \
-                  IS_EMPTY_OR,  IS_EXPR, IS_INT_IN_RANGE, IS_LENGTH, IS_NOT_EMPTY, \
+                  IS_EMPTY_OR, IS_EXPR, IS_INT_IN_RANGE, IS_IN_SET, \
+                  IS_LENGTH, IS_NOT_EMPTY, \
                   P, SQLFORM, URL, XML, current, redirect
 from gluon.storage import Storage
 
 from s3 import IS_ONE_OF, IS_PHONE_NUMBER_MULTI, IS_PHONE_NUMBER_SINGLE, \
                JSONERRORS, S3CustomController, S3GroupedOptionsWidget, \
                S3LocationSelector, S3MultiSelectWidget, S3WeeklyHoursWidget, \
-               S3Represent, s3_comments_widget, s3_date, s3_mark_required, s3_str
+               S3WithIntro, S3Represent, \
+               s3_comments_widget, s3_date, s3_mark_required, s3_str
 
 from .notifications import formatmap
+from .helpers import rlp_deployment_sites
 
 THEME = "RLP"
 
@@ -50,9 +53,9 @@ class index(S3CustomController):
         if AUTHENTICATED not in roles:
 
             login_buttons = DIV(A(T("Login"),
-                                  _id="show-login",
-                                  _class="tiny secondary button"),
-                                _id="login-buttons"
+                                  _id = "show-login",
+                                  _class = "tiny secondary button"),
+                                _id = "login-buttons"
                                 )
             script = '''
 $('#show-mailform').click(function(e){
@@ -78,9 +81,9 @@ $('#show-login').click(function(e){
             if self_registration is True:
                 # Provide a Registration box on front page
                 login_buttons.append(A(T("Register"),
-                                       _id="show-register",
-                                       _class="tiny secondary button",
-                                       _style="margin-left:5px"))
+                                       _id = "show-register",
+                                       _class = "tiny secondary button",
+                                       _style = "margin-left:5px"))
                 script = '''
 $('#show-register').click(function(e){
  e.preventDefault()
@@ -393,6 +396,7 @@ class register(S3CustomController):
                       #"end_date": formvars.end_date,
                       "hours_per_week": formvars.hours_per_week,
                       "schedule_json": formvars.schedule_json,
+                      "availability_sites": formvars.availability_sites,
                       "availability_comments": formvars.availability_comments,
                       "skill_id": formvars.skill_id,
                       "comments": formvars.comments,
@@ -628,7 +632,29 @@ class register(S3CustomController):
                             ),
                       Field("schedule_json", "json",
                             label = T("Availability Schedule"),
-                            widget = S3WeeklyHoursWidget(intro = ("pr", "person_availability", "HoursMatrixIntro"))
+                            widget = S3WithIntro(
+                                        S3WeeklyHoursWidget(),
+                                        # Widget intro from CMS
+                                        intro = ("pr",
+                                                 "person_availability",
+                                                 "HoursMatrixIntro",
+                                                 ),
+                                        ),
+                            ),
+                      Field("availability_sites", "list:integer",
+                            label = T("Possible Deployment Sites"),
+                            requires = IS_EMPTY_OR(IS_IN_SET(rlp_deployment_sites(),
+                                                             multiple = True,
+                                                             sort = False,
+                                                             )),
+                            widget = S3WithIntro(
+                                        S3MultiSelectWidget(),
+                                        # Widget intro from CMS
+                                        intro = ("pr",
+                                                 "person_availability_site",
+                                                 "AvailabilitySitesIntro",
+                                                 ),
+                                        ),
                             ),
                       Field("availability_comments", "text",
                             label = T("Availability Comments"),
@@ -672,8 +698,8 @@ class register(S3CustomController):
                        (8, T("Address")),
                        (11, T("Occupation")),
                        (13, T("Availability and Resources")),
-                       (18, T("Comments")),
-                       (19, T("Privacy")),
+                       (19, T("Comments")),
+                       (20, T("Privacy")),
                        )
 
         # Geocoder
@@ -943,6 +969,22 @@ class register(S3CustomController):
             availability["id"] = atable.insert(**availability)
             set_record_owner(atable, availability, owned_by_user=user_id)
             s3db_onaccept(atable, availability, method="create")
+
+        # Link to availability sites
+        sites = custom.get("availability_sites")
+        ltable = s3db.pr_person_availability_site
+        if isinstance(sites, list):
+            query = (ltable.person_id == person_id) & \
+                    (ltable.deleted == False)
+            for site_id in set(sites):
+                q = (ltable.site_id == site_id) & query
+                if not db(q).select(ltable.id, limitby = (0, 1)).first():
+                    data = {"person_id": person_id,
+                            "site_id": site_id,
+                            }
+                    data["id"] = ltable.insert(**data)
+                    set_record_owner(ltable, data, owned_by_user=user_id)
+                    s3db_onaccept(ltable, data, method="create")
 
         # Register skills
         skills = custom.get("skill_id")

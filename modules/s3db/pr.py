@@ -1114,6 +1114,14 @@ class PRPersonModel(S3Model):
                                                  # Will need tochange in future
                                                  "multiple": False,
                                                  },
+                       org_site = {"name": "availability_sites",
+                                   "link": "pr_person_availability_site",
+                                   "joinby": "person_id",
+                                   "key": "site_id",
+                                   },
+                       pr_person_availability_site = {"name": "availability_site",
+                                                      "joinby": "person_id",
+                                                      },
                        # Awards
                        hrm_award = {"name": "staff_award",
                                     "joinby": "person_id",
@@ -4810,6 +4818,8 @@ class PRAvailabilityModel(S3Model):
              "pr_person_slot",
              "pr_person_availability",
              "pr_person_availability_slot",
+             "pr_person_availability_rule",
+             "pr_person_availability_site",
              )
 
     def model(self):
@@ -5110,6 +5120,15 @@ class PRAvailabilityModel(S3Model):
                            ),
                      Field("end_time", "time",
                            ),
+                     *s3_meta_fields())
+
+        # ---------------------------------------------------------------------
+        # Availability on sites (=link person<>site)
+        #
+        tablename = "pr_person_availability_site"
+        define_table(tablename,
+                     self.pr_person_id(),
+                     self.org_site_id(),
                      *s3_meta_fields())
 
         # ---------------------------------------------------------------------
@@ -8826,6 +8845,7 @@ class pr_Templates(S3Method):
                         (table.deleted == False)
                 templates = current.db(query).select(table.id,
                                                      table.name,
+                                                     orderby = table.name,
                                                      )
                 if not templates:
                     buttons = P(T("No document templates found."))
@@ -8867,6 +8887,8 @@ class pr_Template(S3Method):
             @param r: the S3Request
             @param attr: controller options for this request
         """
+
+        output = None
 
         if r.http == "GET":
             if r.representation == "docx":
@@ -8913,7 +8935,10 @@ class pr_Template(S3Method):
 
                 doc_data = {}
                 for key, selector in mailmerge_fields.items():
-                    if selector == "current_user.name":
+                    if callable(selector):
+                        for k, v in selector(resource, record).items():
+                            doc_data["%s_%s" % (key, k)] = s3_unicode(v)
+                    elif selector == "current_user.name":
                         user = current.auth.user
                         if user:
                             username = s3_format_fullname(fname = user.first_name,
@@ -8947,13 +8972,16 @@ class pr_Template(S3Method):
                 response.headers["Content-disposition"] = disposition
 
                 stream = open(filename, "rb")
-                return response.stream(stream, chunk_size=DEFAULT_CHUNK_SIZE,
-                                       request=r)
-
+                output = response.stream(stream,
+                                         chunk_size = DEFAULT_CHUNK_SIZE,
+                                         request = r,
+                                         )
             else:
                 r.error(415, current.ERROR.BAD_FORMAT)
         else:
             r.error(405, current.ERROR.BAD_METHOD)
+
+        return output
 
 # =============================================================================
 # Hierarchy Manipulation

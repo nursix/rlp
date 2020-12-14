@@ -2725,7 +2725,7 @@ class S3WeeklyHoursWidget(FormWidget):
         matrix, e.g. opening hours, times of availability, etc.
     """
 
-    def __init__(self, daynames=None, hours=None, ticks=6, intro=None):
+    def __init__(self, daynames=None, hours=None, ticks=6):
         """
             Constructor
 
@@ -2734,11 +2734,6 @@ class S3WeeklyHoursWidget(FormWidget):
                              day number 0 meaning Sunday
             @param hours: the hours to show (0..23) as tuple (first, last)
             @param ticks: render tick marks every n hours (0/None=off)
-            @param intro: optional intro text to display above the
-                          matrix in order to explain the widget
-                          - if specified as tuple (module, resourcename, postname),
-                            the intro text will be attempted to retrieve from the
-                            CMS (requires CMS module to be enabled)
         """
 
         if daynames:
@@ -2752,7 +2747,6 @@ class S3WeeklyHoursWidget(FormWidget):
             self.hours = (0, 23)
 
         self.ticks = ticks
-        self.intro = intro
 
     # -------------------------------------------------------------------------
     def __call__(self, field, value, **attributes):
@@ -2785,38 +2779,7 @@ class S3WeeklyHoursWidget(FormWidget):
                    }
         self.inject_script(widget_id, options)
 
-        intro = self.intro
-        if isinstance(intro, tuple):
-            if len(intro) == 3 and current.deployment_settings.has_module("cms"):
-
-                # Get intro text from CMS
-                db = current.db
-                s3db = current.s3db
-
-                ctable = s3db.cms_post
-                ltable = s3db.cms_post_module
-                join = ltable.on((ltable.post_id == ctable.id) & \
-                                (ltable.module == intro[0]) & \
-                                (ltable.resource == intro[1]) & \
-                                (ltable.deleted == False))
-
-                query = (ctable.name == intro[2]) & \
-                        (ctable.deleted == False)
-                row = db(query).select(ctable.body,
-                                       join = join,
-                                       cache = s3db.cache,
-                                       limitby = (0, 1),
-                                       ).first()
-                intro = row.body if row else None
-            else:
-                intro = None
-
-        if intro:
-            return TAG[""](DIV(intro, _class="wh-intro"),
-                           widget,
-                           )
-        else:
-            return widget
+        return widget
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -4994,7 +4957,8 @@ class S3LocationSelector(S3Selector):
 
         # Parse the current value
         values = self.parse(value)
-        location_id = values.get("id")
+        values_get = values.get
+        location_id = values_get("id")
 
         # Determine the default location and bounds
         gtable = s3db.gis_location
@@ -5018,8 +4982,9 @@ class S3LocationSelector(S3Selector):
                                            gtable.lon_min,
                                            gtable.lat_max,
                                            gtable.lon_max,
-                                           cache=s3db.cache,
-                                           limitby=(0, 1)).first()
+                                           cache = s3db.cache,
+                                           limitby = (0, 1)
+                                           ).first()
                 try:
                     default = country.id
                     default_bounds = [country.lon_min,
@@ -5044,7 +5009,7 @@ class S3LocationSelector(S3Selector):
         load_levels = self.load_levels
         lowest_lx = None
         for level in load_levels[::-1]:
-            if level not in levels and values.get(level):
+            if level not in levels and values_get(level):
                 lowest_lx = level
                 break
 
@@ -5055,7 +5020,7 @@ class S3LocationSelector(S3Selector):
 
         # Load initial Hierarchy Labels (for Lx dropdowns)
         labels, labels_compact = self._labels(levels,
-                                              country = values.get("L0"),
+                                              country = values_get("L0"),
                                               )
 
         # Load initial Hierarchy Locations (to populate Lx dropdowns)
@@ -5073,7 +5038,7 @@ class S3LocationSelector(S3Selector):
         # Street Address INPUT
         show_address = self.show_address
         if show_address:
-            address = values.get("address")
+            address = values_get("address")
             if show_address is True:
                 label = gtable.addr_street.label
             else:
@@ -5091,7 +5056,7 @@ class S3LocationSelector(S3Selector):
             # Use global setting
             show_postcode = settings.get_gis_postcode_selector()
         if show_postcode:
-            postcode = values.get("postcode")
+            postcode = values_get("postcode")
             components["postcode"] = manual_input(fieldname,
                                                   "postcode",
                                                   postcode,
@@ -5101,8 +5066,8 @@ class S3LocationSelector(S3Selector):
                                                   )
 
         # Lat/Lon INPUTs
-        lat = values.get("lat")
-        lon = values.get("lon")
+        lat = values_get("lat")
+        lon = values_get("lon")
         if self.show_latlon:
             hidden = not lat and not lon
             components["lat"] = manual_input(fieldname,
@@ -5177,8 +5142,8 @@ class S3LocationSelector(S3Selector):
         # If we need to show the map since we have an existing lat/lon/wkt
         # then we need to launch the client-side JS as a callback to the
         # MapJS loader
-        wkt = values.get("wkt")
-        radius = values.get("radius")
+        wkt = values_get("wkt")
+        radius = values_get("radius")
         if lat is not None or lon is not None or wkt is not None:
             use_callback = True
         else:
@@ -5358,12 +5323,13 @@ class S3LocationSelector(S3Selector):
         s3db = current.s3db
         settings = current.deployment_settings
 
-        L0 = values.get("L0")
-        L1 = values.get("L1")
-        L2 = values.get("L2")
-        L3 = values.get("L3")
-        L4 = values.get("L4")
-        #L5 = values.get("L5")
+        values_get = values.get
+        L0 = values_get("L0")
+        L1 = values_get("L1")
+        L2 = values_get("L2")
+        L3 = values_get("L3")
+        L4 = values_get("L4")
+        #L5 = values_get("L5")
 
         # Read all visible levels
         # NB (level != None) is to handle Missing Levels
@@ -5491,7 +5457,7 @@ class S3LocationSelector(S3Selector):
 
         elif lowest_lx:
             # What is the lowest-level un-selectable Lx?
-            lx = values.get(lowest_lx)
+            lx = values_get(lowest_lx)
             record = db(gtable.id == lx).select(gtable.lat_min,
                                                 gtable.lon_min,
                                                 gtable.lat_max,
@@ -6109,12 +6075,13 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
 
         levels = self.load_levels
 
-        lat = values.get("lat")
-        lon = values.get("lon")
-        wkt = values.get("wkt")
-        radius = values.get("radius")
-        address = values.get("address")
-        postcode = values.get("postcode")
+        values_get = values.get
+        lat = values_get("lat")
+        lon = values_get("lon")
+        wkt = values_get("wkt")
+        radius = values_get("radius")
+        address = values_get("address")
+        postcode = values_get("postcode")
 
         # Load the record
         record = db(table.id == record_id).select(table.id,
