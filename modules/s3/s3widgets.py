@@ -60,6 +60,7 @@ __all__ = ("S3ACLWidget",
            "S3LocationLatLonWidget",
            "S3PasswordWidget",
            "S3PhoneWidget",
+           "S3QRInput",
            "S3Selector",
            "S3LocationSelector",
            "S3MultiSelectWidget",
@@ -2907,6 +2908,99 @@ class S3WeeklyHoursWidget(FormWidget):
         return output if html else "\n".join(output)
 
 # =============================================================================
+class S3QRInput(FormWidget):
+    """
+        Simple input widget with attached QR-code decoder, using the
+        device camera (if available) to capture the code
+
+        @status: experimental
+    """
+
+    def __init__(self, hidden=False):
+        """
+            Constructor
+
+            @param hidden: use a hidden input
+        """
+
+        self.hidden = hidden
+
+    # -------------------------------------------------------------------------
+    def __call__(self, field, value, **attributes):
+        """
+            Widget builder
+
+            @param field: the Field
+            @param value: the current field value
+            @param attributes: additional DOM attributes for the widget
+        """
+
+        T = current.T
+
+        default = {"value": value,
+                   }
+        if self.hidden:
+            default["_type"] = "hidden"
+
+        # Choose input type
+        if field.type == "text":
+            input_type = TextWidget
+        elif field.type == "string":
+            input_type = StringWidget
+        else:
+            input_type = self
+
+        attr = input_type._attributes(field, default, **attributes)
+        widget_id = attr.get("_id")
+        if not widget_id:
+            widget_id = attr["_id"] = str(field).replace(".", "_")
+
+        widget = DIV(INPUT(**attr),
+                     BUTTON(T("Scan QR Code"),
+                            _type = "button",
+                            _class = "tiny primary button qrscan-btn",
+                            ),
+                     _class = "qrinput",
+                     )
+
+        options = {}
+        self.inject_script(widget_id, options)
+
+        return widget
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def inject_script(selector, options):
+        """
+            Inject static JS and instantiate client-side UI widget
+
+            @param widget_id: the widget ID
+            @param options: JSON-serializable dict with UI widget options
+        """
+
+        s3 = current.response.s3
+        appname = current.request.application
+
+        opts = {}
+        opts.update(options)
+        opts["workerPath"] = "/%s/static/scripts/qr-scanner/qr-scanner-worker.min.js" % appname
+
+        # Global scripts
+        # TODO minify
+        scripts = ["/%s/static/scripts/qr-scanner/qr-scanner.umd.min.js",
+                   "/%s/static/scripts/S3/s3.ui.qrinput.js",
+                   ]
+        for script in scripts:
+            path = script % appname
+            if path not in s3.scripts:
+                s3.scripts.append(path)
+
+        # jQuery-ready script
+        script = '''$('#%(selector)s').qrInput(%(options)s);''' % \
+                 {"selector": selector, "options": json.dumps(opts)}
+        s3.jquery_ready.append(script)
+
+# =============================================================================
 class S3EmbeddedComponentWidget(FormWidget):
     """
         Widget used by S3CRUD for link-table components with actuate="embed".
@@ -4931,7 +5025,7 @@ class S3LocationSelector(S3Selector):
         request = current.request
         s3 = current.response.s3
 
-        #self.field = field
+        self.field = field
 
         # Is the location input required?
         requires = field.requires
@@ -6118,7 +6212,7 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
         path_ok = True
         if level:
             # Lx location
-            values["level"] = level
+            #values["level"] = level # Currently unused and not updated by s3.ui.locationselector.js
             values["specific"] = None
 
             if len(path) != (int(level[1:]) + 1):
@@ -6505,9 +6599,11 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
                 # Create new specific location (indicate by id=0)
                 values["id"] = 0
 
-                # Permission to create?
-                if not current.auth.s3_has_permission("create", table):
-                    return (values, current.auth.messages.access_denied)
+                # Skip Permission check if the field is JSON type (e.g. during Registration)
+                if self.field.type != "json":
+                    # Permission to create?
+                    if not current.auth.s3_has_permission("create", table):
+                        return (values, current.auth.messages.access_denied)
 
                 # Check for duplicate address
                 if self.prevent_duplicate_addresses:
@@ -6640,9 +6736,24 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
         if location_id is None:
             return location_id, None
 
-        # Skip if the field is JSON type (e.g. during Registration)
-        #if self.field.type == "json":
-        #    return location_id, None
+        if self.field.type == "json":
+            # Save raw data suitable for later link to location_id or creation of new location
+            # e.g. during Approval of a new Registration
+            if location_id == 0:
+                del values["id"]
+            try:
+                del values["specific"]
+            except KeyError:
+                pass
+            try:
+                del values["address"] # Duplicate of addr_street
+            except KeyError:
+                pass
+            try:
+                del values["postcode"] # Duplicate of addr_postcode
+            except KeyError:
+                pass
+            return values, None
 
         db = current.db
         table = current.s3db.gis_location
