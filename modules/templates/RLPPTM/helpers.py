@@ -6,10 +6,50 @@
     @license: MIT
 """
 
-from gluon import current, CRYPT, Field, INPUT, SQLFORM, URL, \
+from gluon import current, CRYPT, Field, INPUT, SQLFORM, \
                   IS_EMAIL, IS_LOWER, IS_NOT_IN_DB
 
 from s3 import S3Method, s3_mark_required
+
+# =============================================================================
+def get_org_accounts(organisation_id):
+
+    auth = current.auth
+    s3db = current.s3db
+
+    # Get all accounts that are linked to this org
+    utable = auth.settings.table_user
+    oltable = s3db.org_organisation_user
+    pltable = s3db.pr_person_user
+
+    join = oltable.on((oltable.user_id == utable.id) & \
+                      (oltable.deleted == False))
+    left = pltable.on((pltable.user_id == utable.id) & \
+                      (pltable.deleted == False))
+    query = (oltable.organisation_id == organisation_id)
+    rows = current.db(query).select(utable.id,
+                                    utable.first_name,
+                                    utable.last_name,
+                                    utable.email,
+                                    utable.registration_key,
+                                    pltable.pe_id,
+                                    join = join,
+                                    left = left,
+                                    )
+
+    active, disabled, invited = [], [], []
+    for row in rows:
+        user = row[utable]
+        person_link = row.pr_person_user
+        if person_link.pe_id:
+            if user.registration_key:
+                disabled.append(user)
+            else:
+                active.append(user)
+        else:
+            invited.append(user)
+
+    return active, disabled, invited
 
 # =============================================================================
 class rlpptm_InviteUserOrg(S3Method):
@@ -64,39 +104,8 @@ class rlpptm_InviteUserOrg(S3Method):
         output = {"title": T("Invite Organisation"),
                   }
 
-        # Get all accounts that are linked to this org
-        utable = auth_settings.table_user
-        oltable = s3db.org_organisation_user
-        pltable = s3db.pr_person_user
-
-        organisation_id = r.record.id
-        join = oltable.on((oltable.user_id == utable.id) & \
-                          (oltable.deleted == False))
-        left = pltable.on((pltable.user_id == utable.id) & \
-                          (pltable.deleted == False))
-        query = (oltable.organisation_id == organisation_id)
-        rows = db(query).select(utable.id,
-                                utable.first_name,
-                                utable.last_name,
-                                utable.email,
-                                utable.registration_key,
-                                pltable.pe_id,
-                                join = join,
-                                left = left,
-                                )
-
-        active, disabled, invited = [], [], []
-        for row in rows:
-            user = row[utable]
-            person_link = row.pr_person_user
-            if person_link.pe_id:
-                if user.registration_key:
-                    disabled.append(user)
-                else:
-                    active.append(user)
-            else:
-                invited.append(user)
-
+        # Check for existing accounts
+        active, disabled, invited = get_org_accounts(r.record.id)
         if active or disabled:
             response.error = T("There are already user accounts registered for this organization")
 
@@ -127,7 +136,7 @@ class rlpptm_InviteUserOrg(S3Method):
 
         account = invited[0] if invited else None
 
-        # Look up existing invite-account
+        # Look up email to use for invitation
         email = None
         if account:
             email = account.email
@@ -144,6 +153,7 @@ class rlpptm_InviteUserOrg(S3Method):
                 email = contact.value
 
         # Form Fields
+        utable = auth_settings.table_user
         dbset = db(utable.id != account.id) if account else db
         formfields = [Field("email",
                             default = email,
@@ -157,8 +167,7 @@ class rlpptm_InviteUserOrg(S3Method):
                       ]
 
         # Generate labels (and mark required fields in the process)
-        labels, has_required = s3_mark_required(formfields,
-                                                )
+        labels, has_required = s3_mark_required(formfields)
         response.s3.has_required = has_required
 
         # Form buttons
@@ -234,6 +243,13 @@ class rlpptm_InviteUserOrg(S3Method):
                 return "could not update preliminary account"
         else:
             utable = current.auth.settings.table_user
+
+            # Catch email addresses already used in existing accounts
+            if current.db(utable.email == email).select(utable.id,
+                                                        limitby = (0, 1),
+                                                        ).first():
+                return "email address %s already in use" % email
+
             user_id = utable.insert(**data)
             if user_id:
                 ltable = current.s3db.org_organisation_user
@@ -244,13 +260,13 @@ class rlpptm_InviteUserOrg(S3Method):
                 return "could not create preliminary account"
 
         # Compose and send invitation email
-        registration_url = URL(c = "default",
-                               f = "index",
-                               args = ["register_invited", key],
-                               scheme = "https" if request.is_https else "http",
-                               )
+        # => must use public_url setting because URL() produces a
+        #    localhost address when called from CLI or script
+        base_url = current.deployment_settings.get_base_public_url()
+        appname = request.application
+        registration_url = "%s/%s/default/index/register_invited/%s"
 
-        data = {"url": registration_url,
+        data = {"url": registration_url % (base_url, appname, key),
                 "code": code,
                 }
 
