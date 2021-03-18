@@ -11,7 +11,7 @@ import datetime
 
 from collections import OrderedDict
 
-from gluon import current, redirect, URL, DIV, TABLE, TAG, TR
+from gluon import current, redirect, URL, A, DIV, TABLE, TAG, TR
 from gluon.storage import Storage
 
 from s3 import FS, IS_LOCATION, S3DateFilter, S3Represent, s3_fieldmethod, s3_fullname, s3_yes_no_represent
@@ -163,6 +163,10 @@ def config(settings):
 
     # Override in models/000_config.py with site-specific file name
     settings.custom.poolrules = "poolrules.default.xml"
+
+    # -------------------------------------------------------------------------
+    # UI Settings
+    settings.ui.calendar_clear_icon = True
 
     # -------------------------------------------------------------------------
     # Realm Rules
@@ -337,6 +341,7 @@ def config(settings):
                                               "date",
                                               "comments",
                                               ],
+                               orderby = "cms_post.name",
                                )
 
     settings.customise_cms_post_resource = customise_cms_post_resource
@@ -374,6 +379,52 @@ def config(settings):
     settings.customise_cms_post_controller = customise_cms_post_controller
 
     # -------------------------------------------------------------------------
+    def customise_org_organisation_resource(r, tablename):
+
+        T = current.T
+
+        s3db = current.s3db
+
+        if r.tablename == "org_organisation" and not r.component:
+
+            # Use custom form with email-address
+            from s3 import S3SQLCustomForm, \
+                           S3SQLInlineComponent, \
+                           S3SQLInlineLink
+
+            crud_fields = ["name",
+                           "acronym",
+                           S3SQLInlineLink(
+                                "organisation_type",
+                                field = "organisation_type_id",
+                                search = False,
+                                label = T("Type"),
+                                multiple = settings.get_org_organisation_types_multiple(),
+                                widget = "multiselect",
+                                ),
+                           S3SQLInlineComponent(
+                                "contact",
+                                fields = [("", "value")],
+                                filterby = {"field": "contact_method",
+                                            "options": "EMAIL",
+                                            },
+                                label = T("Email"),
+                                multiple = False,
+                                name = "email",
+                                ),
+                           "phone",
+                           "website",
+                           "logo",
+                           "comments",
+                           ]
+
+            s3db.configure("org_organisation",
+                           crud_form = S3SQLCustomForm(*crud_fields),
+                           )
+
+    settings.customise_org_organisation_resource = customise_org_organisation_resource
+
+    # -------------------------------------------------------------------------
     def customise_org_organisation_controller(**attr):
 
         s3 = current.response.s3
@@ -406,7 +457,6 @@ def config(settings):
 
                 # TODO adjust list_fields to what is necessary
                 # TODO use simplified form
-
 
             return result
         s3.prep = custom_prep
@@ -1792,6 +1842,8 @@ def config(settings):
             #    field.writable = False
             #    field.comment = None
 
+        return next_status
+
     # -------------------------------------------------------------------------
     def delegation_free_interval(target, occupied, recurse=False, original=None):
         """
@@ -2096,6 +2148,7 @@ def config(settings):
 
         table = s3db.hrm_delegation
 
+        # Custom representation of person_id
         from .helpers import RLPDelegatedPersonRepresent
         field = table.person_id
         field.represent = RLPDelegatedPersonRepresent()
@@ -2175,7 +2228,7 @@ def config(settings):
                 min_date = min(record.date, tomorrow) if record.date else tomorrow
             elif not coordinator:
                 min_date = tomorrow
-            delegation_workflow(r.resource.table, record, person_id=volunteer_id)
+            next_status = delegation_workflow(r.resource.table, record, person_id=volunteer_id)
 
         elif r.component.tablename == "hrm_delegation":
             # On tab of volunteer file
@@ -2186,7 +2239,8 @@ def config(settings):
                 r.component.add_filter(FS("status") != "NVLD")
                 record = None
 
-            delegation_workflow(r.component.table, record, person_id=r.id)
+            volunteer_id = r.id
+            next_status = delegation_workflow(r.component.table, record, person_id=volunteer_id)
 
             # Determine earliest start date
             if record:
@@ -2200,6 +2254,8 @@ def config(settings):
                                        "requested_on",
                                        "status",
                                        ]
+        else:
+            next_status = None
 
         # Start and end date are mandatory
         from gluon import IS_EMPTY_OR
@@ -2218,8 +2274,9 @@ def config(settings):
                                             set_min = "#hrm_delegation_end_date",
                                             )
 
-        if current.auth.s3_has_role("COORDINATOR"):
-            # Coordinators use custom form
+        # Configure custom forms
+        auth = current.auth
+        if auth.s3_has_role("COORDINATOR"):
             from s3 import S3SQLCustomForm
             crud_form = S3SQLCustomForm("organisation_id",
                                         "person_id",
@@ -2239,21 +2296,62 @@ def config(settings):
                                         ))
             s3db.configure("hrm_delegation", crud_form=crud_form)
 
-        #elif current.auth.s3_has_roles(("HRMANAGER", "VCMANAGER")):
-        #    # Enable site_id and filter to sites of org
-        #    field = table.site_id
-        #    field.readable = field.writable = True
-        #    field.label = T("Deployment Site")
-        #    from s3 import IS_ONE_OF
-        #    field.requires = IS_EMPTY_OR(IS_ONE_OF(current.db, "org_site.site_id",
-        #                                           s3db.org_site_represent,
-        #                                           ))
-        #    script = '''$.filterOptionsS3({
-        #'trigger':'organisation_id',
-        #'target':'site_id',
-        #'lookupURL':S3.Ap.concat('/org/sites_for_org/'),
-        #})'''
-        #    current.response.s3.jquery_ready.append(script)
+        elif auth.s3_has_roles(("HRMANAGER", "VCMANAGER")):
+            from s3 import S3SQLCustomForm
+            crud_form = S3SQLCustomForm("organisation_id",
+                                        "person_id",
+                                        "date",
+                                        "end_date",
+                                        "requested_on",
+                                        "status",
+                                        "comments",
+                                        )
+            if not record or record.status != "APPR" and \
+               next_status and "APPR" in next_status:
+                # Request that can be approved
+
+                # Lookup labels for selectable organisations
+                field = table.organisation_id
+                requires = field.requires
+                if isinstance(requires, (list, tuple)):
+                    requires = requires[0]
+                if hasattr(requires, "options"):
+                    represent = S3Represent(lookup="org_organisation")
+                    options = requires.options()
+                    organisations = represent.bulk([o[0] for o in options if o[0]])
+                else:
+                    organisations = None
+
+                # Append inline-notifications
+                from s3 import S3WithIntro
+                from .notifications import InlineNotifications
+                crud_form.append(
+                    S3WithIntro(
+                        InlineNotifications("notifications",
+                                            label = T("Notifications"),
+                                            person_id = volunteer_id,
+                                            organisations = organisations,
+                                            reply_to = "user", #"org",
+                                            sender = "org",
+                                            ),
+                        intro = ("hrm", "delegation", "NotificationIntroOrg"),
+                        ))
+            s3db.configure("hrm_delegation", crud_form=crud_form)
+
+            # Enable site_id and filter to sites of org
+            #field = table.site_id
+            #field.readable = field.writable = True
+            #field.label = T("Deployment Site")
+            #from s3 import IS_ONE_OF
+            #field.requires = IS_EMPTY_OR(IS_ONE_OF(current.db, "org_site.site_id",
+            #                                       s3db.org_site_represent,
+            #                                       ))
+            #script = '''$.filterOptionsS3({
+            #'trigger':'organisation_id',
+            #'target':'site_id',
+            #'lookupURL':S3.Ap.concat('/org/sites_for_org/'),
+            #})'''
+            #current.response.s3.jquery_ready.append(script)
 
         # Reconfigure
         s3db.add_custom_callback("hrm_delegation",
@@ -2300,11 +2398,11 @@ def config(settings):
                            insertable = False,
                            )
 
+        auth = current.auth
+        coordinator = auth.s3_has_role("COORDINATOR")
+
         standard_prep = s3.prep
         def custom_prep(r):
-
-            auth = current.auth
-            coordinator = auth.s3_has_role("COORDINATOR")
 
             if not coordinator:
                 settings.ui.export_formats = ("pdf", "xls")
@@ -2471,6 +2569,51 @@ def config(settings):
                             )
             return result
         s3.prep = custom_prep
+
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if r.controller == "vol" and volunteer_id and isinstance(output, dict):
+
+                from s3 import S3CustomController
+
+                method = r.method
+                if not method:
+                    # Add link to organizer
+                    output["switch_btn"] = A(T("Switch to organizer"),
+                                             _href = r.url(method="organize"),
+                                             _class = "action-btn organizer-switch",
+                                             _title = T("Manage deployments in a calendar view"),
+                                             )
+
+                    # Use custom view to keep organizer-link above form
+                    S3CustomController._view("RLP", "delegation.html")
+
+                elif method == "organize":
+                    # Add hint how to use the organizer
+                    if not coordinator:
+                        from .helpers import get_cms_intro
+                        intro = get_cms_intro("hrm", "delegation",
+                                              "DelegationOrganizerIntro",
+                                              cmsxml = True,
+                                              )
+                        if intro:
+                            output["intro"] = intro
+                    # Add switch to list view
+                    output["switch"] = A(T("Switch to list view"),
+                                         _href = r.url(method=""),
+                                         _class = "action-btn",
+                                         _title = T("Manage deployments in a table view"),
+                                         )
+                    # Use custom view
+                    S3CustomController._view("RLP", "organize.html")
+
+            return output
+        s3.postp = custom_postp
 
         # Custom rheaders
         from .rheaders import rlp_vol_rheader, rlp_delegation_rheader

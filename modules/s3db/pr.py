@@ -2,7 +2,7 @@
 
 """ Sahana Eden Person Registry Model
 
-    @copyright: 2009-2020 (c) Sahana Software Foundation
+    @copyright: 2009-2021 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -6272,7 +6272,7 @@ class PRPersonDetailsModel(S3Model):
                                 represent = nationality_repr,
                                 requires = IS_EMPTY_OR(
                                             IS_IN_SET_LAZY(nationality_opts,
-                                                           zero = messages.SELECT_LOCATION,
+                                                           zero = T("Select Country"),
                                                            )),
                                 comment = DIV(_class="tooltip",
                                               _title="%s|%s" % (T("Nationality"),

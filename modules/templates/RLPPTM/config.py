@@ -9,10 +9,11 @@
 
 from collections import OrderedDict
 
-from gluon import current, URL, A, DIV, IS_EMPTY_OR, IS_IN_SET, TAG
+from gluon import current, URL, A, B, DIV, TAG, \
+                  IS_EMPTY_OR, IS_IN_SET, IS_INT_IN_RANGE, IS_NOT_EMPTY
 from gluon.storage import Storage
 
-from s3 import FS, IS_ONE_OF, S3Represent, s3_str
+from s3 import FS, IS_FLOAT_AMOUNT, IS_NOT_ONE_OF, IS_ONE_OF, S3Represent, s3_str
 from s3dal import original_tablename
 
 from .rlpgeonames import rlp_GeoNames
@@ -21,16 +22,17 @@ LSJV = "Landesamt für Soziales, Jugend und Versorgung"
 SCHOOLS = "Schulen"
 TESTSTATIONS = "COVID-19 Teststellen"
 
-ALLOWED_FORMATS = ("html", "iframe", "popup", "aadata", "json", "xls", "pdf")
+ISSUER_ORG_TYPE = "pe_id$pe_id:org_organisation.org_organisation_organisation_type.organisation_type_id"
 
+ALLOWED_FORMATS = ("html", "iframe", "popup", "aadata", "json")
 # =============================================================================
 def config(settings):
 
     T = current.T
 
     purpose = {"event": "COVID-19"}
-    settings.base.system_name = T("%(event)s Personnel Testing") % purpose
-    settings.base.system_name_short = T("%(event)s Personnel Testing") % purpose
+    settings.base.system_name = T("%(event)s Testing") % purpose
+    settings.base.system_name_short = T("%(event)s Testing") % purpose
 
     # PrePopulate data
     settings.base.prepopulate += ("RLPPTM",)
@@ -39,6 +41,10 @@ def config(settings):
     # Theme (folder to use for views/layout.html)
     settings.base.theme = "RLP"
     settings.base.theme_layouts = "RLPPTM"
+
+    # Custom XSLT transformation stylesheets
+    settings.base.xml_formats = {"wws": "RLPPTM"}
+
     # Custom Logo
     #settings.ui.menu_logo = "/%s/static/themes/<templatename>/img/logo.png" % current.request.application
 
@@ -59,10 +65,14 @@ def config(settings):
     settings.auth.password_retrieval = True
 
     settings.auth.realm_entity_types = ("org_group", "org_organisation")
-    settings.auth.privileged_roles = {"PROGRAM_MANAGER": "ORG_GROUP_ADMIN",
+    settings.auth.privileged_roles = {"DISEASE_TEST_READER": "ORG_GROUP_ADMIN",
+                                      "PROGRAM_ACCOUNTANT": "PROGRAM_ACCOUNTANT",
+                                      "PROGRAM_MANAGER": "ORG_GROUP_ADMIN",
+                                      "PROVIDER_ACCOUNTANT": "PROVIDER_ACCOUNTANT",
+                                      "SUPPLY_COORDINATOR": "SUPPLY_COORDINATOR",
+                                      "SUPPLY_REQUESTER": "SUPPLY_REQUESTER",
                                       "VOUCHER_ISSUER": "VOUCHER_ISSUER",
                                       "VOUCHER_PROVIDER": "VOUCHER_PROVIDER",
-                                      "DISEASE_TEST_READER": "ORG_GROUP_ADMIN",
                                       }
 
     settings.auth.password_min_length = 8
@@ -162,7 +172,47 @@ def config(settings):
     settings.org.default_organisation = LSJV
 
     # -------------------------------------------------------------------------
+    settings.project.multiple_organisations = True
+
+    # -------------------------------------------------------------------------
     settings.fin.voucher_personalize = "dob"
+    settings.fin.voucher_eligibility_types = True
+    settings.fin.voucher_invoice_status_labels = {"VERIFIED": None,
+                                                  "APPROVED": None,
+                                                  "PAID": "Payment Ordered",
+                                                  }
+    settings.fin.voucher_claim_paid_label = "Payment Ordered"
+
+    # -------------------------------------------------------------------------
+    settings.req.req_type = ("Stock",)
+    settings.req.type_inv_label = ("Equipment")
+
+    settings.req.copyable = False
+    settings.req.recurring = False
+
+    settings.req.req_shortname = "BANF"
+    settings.req.requester_label = "Orderer"
+    settings.req.date_editable = False
+    settings.req.status_writable = False
+
+    settings.req.pack_values = False
+    settings.req.inline_forms = True
+    settings.req.use_commit = False
+
+    settings.req.items_ask_purpose = False
+    settings.req.prompt_match = False
+
+    # -------------------------------------------------------------------------
+    settings.inv.track_pack_values = False
+    settings.inv.send_show_org = False
+
+    # -------------------------------------------------------------------------
+    settings.supply.catalog_default = "Material für Teststellen"
+    settings.supply.catalog_multi = False
+
+    # -------------------------------------------------------------------------
+    # UI Settings
+    settings.ui.calendar_clear_icon = True
 
     # -------------------------------------------------------------------------
     # Realm Rules
@@ -221,9 +271,36 @@ def config(settings):
         #    # Debits are owned by the provider PE (default ok)
         #    realm_entity = 0
         #
-        elif tablename == "fin_voucher_transaction":
+        #elif tablename == "fin_voucher_claim":
+        #
+        #    # Claims are owned by the provider PE (default ok)
+        #    realm_entity = 0
+        #
+        elif tablename == "fin_voucher_invoice":
 
-            # Vouchers inherit the realm-entity from the program
+            # Invoices are owned by the accountant organization of the billing
+            table = s3db.table(tablename)
+            btable = s3db.fin_voucher_billing
+            query = (table._id == row.id) & \
+                    (btable.id == table.billing_id)
+            billing = db(query).select(btable.organisation_id,
+                                       btable.realm_entity,
+                                       limitby = (0, 1),
+                                       ).first()
+            if billing:
+                organisation_id = billing.organisation_id
+                if organisation_id:
+                    realm_entity = s3db.pr_get_pe_id("org_organisation",
+                                                     organisation_id,
+                                                     )
+                else:
+                    realm_entity = billing.realm_entity
+
+        elif tablename in ("fin_voucher_billing",
+                           "fin_voucher_transaction",
+                           ):
+
+            # Billings and transactions inherit realm-entity of the program
             table = s3db.table(tablename)
             ptable = s3db.fin_voucher_program
             query = (table._id == row.id) & \
@@ -233,7 +310,6 @@ def config(settings):
                                        ).first()
             if program:
                 realm_entity = program.realm_entity
-
 
         return realm_entity
 
@@ -379,26 +455,34 @@ def config(settings):
 
         table = s3db.disease_case_diagnostics
 
-        if r.interactive and r.method != "report":
+        from .helpers import get_stats_projects
+        report_results = get_stats_projects()
+
+        if not report_results: # or current.auth.s3_has_role("ADMIN"):
+            s3db.configure("disease_case_diagnostics",
+                           insertable = False,
+                           )
+
+        if r.interactive and report_results and r.method != "report":
+
             # Enable project link and make it mandatory
             field = table.project_id
-            field.readable = field.writable = True
-            field.comment = None
-            requires = field.requires
-            if isinstance(requires, (list, tuple)):
-                requires = requires[0]
-            if isinstance(requires, IS_EMPTY_OR):
-                field.requires = requires.other
+            field.readable = True
 
-            # If there is only one project, default the selector + make r/o
             ptable = s3db.project_project
-            rows = db(ptable.deleted == False).select(ptable.id,
-                                                      cache = s3db.cache,
-                                                      limitby = (0, 2),
-                                                      )
-            if len(rows) == 1:
-                field.default = rows[0].id
+            if len(report_results) == 1:
+                project_id = report_results[0]
+                dbset = db(ptable.id == project_id)
+                field.default = project_id
                 field.writable = False
+            else:
+                dbset = ptable.id.belongs(report_results)
+                field.writable = True
+            field.requires = IS_ONE_OF(dbset, "project_project.id",
+                                       field.represent,
+                                       )
+
+            field.comment = None
 
             # Enable disease link and make it mandatory
             field = table.disease_id
@@ -446,8 +530,9 @@ def config(settings):
                           ("INC", T("Inconclusive")),
                           )
         field = table.result
+        field.default = "POS"
         field.requires = IS_IN_SET(result_options,
-                                   zero = "",
+                                   zero = None,
                                    sort = False,
                                    )
         field.represent = S3Represent(options=dict(result_options))
@@ -531,11 +616,48 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_fin_voucher_resource(r, tablename):
 
-        s3db = current.s3db
+        auth = current.auth
+        has_role = auth.s3_has_role
 
+        s3db = current.s3db
         table = s3db.fin_voucher
 
+        # Determine form mode
+        resource = r.resource
+        group_voucher = resource.tablename == "fin_voucher" and \
+                        r.get_vars.get("g") == "1"
+
         # Customise fields
+        field = table.pe_id
+        field.label = T("Issuer##fin")
+
+        from s3 import S3WithIntro
+        field = table.bearer_dob
+        if group_voucher:
+            label = T("Group Representative Date of Birth")
+            intro = "GroupDoBIntro"
+        else:
+            label = T("Beneficiary Date of Birth")
+            intro = "BearerDoBIntro"
+        field.label = label
+        field.widget = S3WithIntro(field.widget,
+                                   intro = ("fin",
+                                            "voucher",
+                                            intro,
+                                            ),
+                                   )
+        if not has_role("VOUCHER_ISSUER"):
+            field.readable = field.writable = False
+
+        field = table.initial_credit
+        field.label = T("Number of Beneficiaries")
+        if group_voucher:
+            field.default = None
+            field.requires = IS_INT_IN_RANGE(1, 51,
+                                error_message = T("Enter the number of beneficiaries (max %(max)s)"),
+                                )
+            field.readable = field.writable = True
+
         field = table.comments
         field.label = T("Memoranda")
         field.comment = DIV(_class="tooltip",
@@ -543,27 +665,64 @@ def config(settings):
                                               T("Notes of the Issuer"),
                                               ),
                             )
-
-        field = table.balance
-        field.label = T("Status")
-        field.represent = lambda v: T("Issued##fin") if v > 0 else T("Redeemed##fin")
+        if not has_role("VOUCHER_PROVIDER"):
+            field.readable = field.writable = False
 
         # Custom list fields
-        list_fields = ["program_id",
-                       "signature",
-                       #"bearer_dob",
-                       "balance",
-                       "date",
-                       "valid_until",
-                       #"comments",
-                       ]
-        if current.auth.s3_has_role("VOUCHER_ISSUER"):
-            if settings.get_fin_voucher_personalize() == "dob":
-                list_fields.insert(2, "bearer_dob")
-            list_fields.append("comments")
+        if has_role("VOUCHER_ISSUER"):
+            list_fields = ["program_id",
+                           "signature",
+                           (T("Beneficiary/Representative Date of Birth"), "bearer_dob"),
+                           "initial_credit",
+                           "credit_spent",
+                           (T("Status"), "status"),
+                           "date",
+                           #"valid_until",
+                           "comments",
+                           ]
+        else:
+            list_fields = ["program_id",
+                           "signature",
+                           (T("Status"), "status"),
+                           "pe_id",
+                           #(T("Issuer Type"), ISSUER_ORG_TYPE),
+                           "eligibility_type_id",
+                           "initial_credit",
+                           "credit_spent",
+                           "date",
+                           #"valid_until",
+                           ]
+
+        # Report Options
+        if r.method == "report":
+            facts = ((T("Credit Redeemed"), "sum(credit_spent)"),
+                     (T("Credit Issued"), "sum(initial_credit)"),
+                     (T("Remaining Credit"), "sum(balance)"),
+                     (T("Number of Vouchers"), "count(id)"),
+                     )
+            axes = [ISSUER_ORG_TYPE,
+                    "eligibility_type_id",
+                    "program_id",
+                    "status",
+                    "pe_id",
+                    ]
+            report_options = {
+                "rows": axes,
+                "cols": axes,
+                "fact": facts,
+                "defaults": {"rows": axes[0],
+                             "cols": axes[1],
+                             "fact": facts[0],
+                             "totals": True,
+                             },
+                }
+            s3db.configure("fin_voucher",
+                           report_options = report_options,
+                           )
 
         s3db.configure("fin_voucher",
                        list_fields = list_fields,
+                       orderby = "fin_voucher.date desc",
                        )
 
     settings.customise_fin_voucher_resource = customise_fin_voucher_resource
@@ -573,11 +732,23 @@ def config(settings):
 
         s3 = current.response.s3
 
+        # Enable bigtable features
+        settings.base.bigtable = True
+
         # Custom prep
         standard_prep = s3.prep
         def prep(r):
             # Call standard prep
             result = standard_prep(r) if callable(standard_prep) else True
+
+            # Restrict data formats
+            settings.ui.export_formats = None
+            representation = r.representation
+            if representation not in ALLOWED_FORMATS and \
+               not(r.record and representation == "card"):
+                r.error(403, current.ERROR.NOT_PERMITTED)
+
+            is_program_manager = current.auth.s3_has_role("PROGRAM_MANAGER")
 
             db = current.db
             s3db = current.s3db
@@ -587,6 +758,10 @@ def config(settings):
 
             resource = r.resource
             table = resource.table
+
+            if program_ids and org_ids:
+                etypes = s3db.fin_voucher_eligibility_types(program_ids, org_ids)
+                program_ids = list(etypes.keys())
 
             if not program_ids or not org_ids:
                 # User is not permitted to issue vouchers for any programs/issuers
@@ -601,44 +776,96 @@ def config(settings):
                                            field.represent,
                                            sort = True,
                                            )
-                # Hide the program selector if only one program can be chosen
-                rows = dbset.select(ptable.id, limitby=(0, 2))
-                if len(rows) == 1:
-                    field.default = rows.first().id
+                # Default the program selector if only one program can be chosen
+                if len(program_ids) == 1:
+                    program_id = program_ids[0]
+                    field.default = program_id
                     field.writable = False
+
+                # Limit the eligibility type selector to applicable types
+                allow_empty = False
+                if len(program_ids) == 1:
+                    etype_ids = etypes[program_ids[0]]
+                else:
+                    etype_ids = []
+                    for item in etypes.values():
+                        if item:
+                            etype_ids += item
+                        else:
+                            allow_empty = True
+                    etype_ids = list(set(etype_ids)) if etype_ids else None
+
+                field = table.eligibility_type_id
+                if etype_ids is None:
+                    # No selectable eligibility types => hide selector
+                    field.readable = field.writable = False
+                elif len(etype_ids) == 1 and not allow_empty:
+                    # Only one type selectable => default
+                    field.default = etype_ids[0]
+                    field.writable = False
+                else:
+                    # Multiple types selectable
+                    ttable = s3db.fin_voucher_eligibility_type
+                    etset = db(ttable.id.belongs(etype_ids))
+                    field.requires = IS_ONE_OF(etset, "fin_voucher_eligibility_type.id",
+                                               field.represent,
+                                               sort = True,
+                                               )
+                    if allow_empty:
+                        field.requires = IS_EMPTY_OR(field.requires)
 
                 # Limit the issuer selector to permitted entities
                 etable = s3db.pr_pentity
                 field = table.pe_id
                 dbset = db(etable.pe_id.belongs(pe_ids))
                 field.requires = IS_ONE_OF(dbset, "pr_pentity.pe_id",
-                                            field.represent,
-                                            )
+                                           field.represent,
+                                           )
                 # Hide the issuer selector if only one entity can be chosen
-                rows = dbset.select(etable.pe_id, limitby=(0, 2))
-                if len(rows) == 1:
-                    field.default = rows.first().pe_id
+                if len(pe_ids) == 1:
+                    field.default = pe_ids[0]
                     field.readable = field.writable = False
 
             if r.interactive:
+
+                if r.get_vars.get("g") == "1":
+                    s3.crud_strings["fin_voucher"]["label_create"] = T("Create Group Voucher")
 
                 # Hide valid_until from create-form (will be set onaccept)
                 field = table.valid_until
                 field.readable = bool(r.record)
                 field.writable = False
 
+                # Always show number of beneficiaries
+                if r.record:
+                    field = table.initial_credit
+                    field.readable = True
+
                 # Filter Widgets
                 from s3 import S3DateFilter, S3TextFilter
+                text_fields = ["signature", "comments", "program_id$name"]
+                if is_program_manager:
+                    text_fields.append("pe_id$pe_id:org_organisation.name")
                 filter_widgets = [
-                    S3TextFilter(["signature",
-                                  "comments",
-                                  "program_id$name",
-                                  ],
+                    S3TextFilter(text_fields,
                                  label = T("Search"),
                                  ),
                     S3DateFilter("date",
                                  ),
                     ]
+                if is_program_manager:
+                    from s3 import S3OptionsFilter, s3_get_filter_opts
+                    filter_widgets.extend([
+                        S3OptionsFilter("eligibility_type_id",
+                                        hidden = True,
+                                        label = T("Type of Eligibility"),
+                                        ),
+                        S3OptionsFilter(ISSUER_ORG_TYPE,
+                                        hidden = True,
+                                        label = T("Issuer Type"),
+                                        options = lambda: s3_get_filter_opts("org_organisation_type"),
+                                        ),
+                        ])
                 resource.configure(filter_widgets = filter_widgets,
                                    )
 
@@ -646,10 +873,10 @@ def config(settings):
                 # Configure ID card layout
                 from .vouchers import VoucherCardLayout
                 resource.configure(pdf_card_layout = VoucherCardLayout,
-                                    pdf_card_suffix = lambda record: \
+                                   pdf_card_suffix = lambda record: \
                                         s3_str(record.signature) \
                                         if record and record.signature else None,
-                                    )
+                                   )
             return result
         s3.prep = prep
 
@@ -692,9 +919,16 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_fin_voucher_debit_resource(r, tablename):
 
-        s3db = current.s3db
+        auth = current.auth
+        has_role = auth.s3_has_role
 
+        s3db = current.s3db
         table = s3db.fin_voucher_debit
+
+        # Determine form mode
+        resource = r.resource
+        group_voucher = resource.tablename == "fin_voucher_debit" and \
+                        r.get_vars.get("g") == "1"
 
         # Customise fields
         field = table.comments
@@ -704,22 +938,43 @@ def config(settings):
                                               T("Notes of the Provider"),
                                               ),
                             )
+        if not has_role("VOUCHER_PROVIDER"):
+            field.readable = field.writable = False
+
+        field = table.bearer_dob
+        if group_voucher:
+            label = T("Group Representative Date of Birth")
+        else:
+            label = T("Beneficiary Date of Birth")
+        field.label = label
+        if not has_role("VOUCHER_PROVIDER"):
+            field.readable = field.writable = False
+
+        field = table.quantity
+        if group_voucher:
+            field.default = None
+            field.requires = IS_INT_IN_RANGE(1,
+                                error_message = T("Enter the service quantity"),
+                                )
+            field.readable = field.writable = True
 
         field = table.balance
-        field.label = T("Status")
-        field.represent = lambda v: T("Redeemed##fin") if v > 0 else T("Compensated##fin")
+        field.label = T("Remaining Compensation Claims")
 
         # Custom list_fields
         list_fields = [(T("Date"), "date"),
-                        "program_id",
-                        "voucher_id$signature",
-                        "balance",
-                        ]
-        if current.auth.s3_has_role("PROGRAM_MANAGER"):
+                       "program_id",
+                       "voucher_id$signature",
+                       "quantity",
+                       "status",
+                       ]
+        if current.auth.s3_has_roles(("PROGRAM_MANAGER", "PROGRAM_ACCOUNTANT")):
+            # Include issuer and provider
             list_fields[3:3] = ["voucher_id$pe_id",
                                 "pe_id",
                                 ]
-        if current.auth.s3_has_role("VOUCHER_PROVIDER"):
+        if has_role("VOUCHER_PROVIDER"):
+            # Include provider notes
             list_fields.append("comments")
 
         s3db.configure("fin_voucher_debit",
@@ -732,22 +987,24 @@ def config(settings):
             filter_widgets = [S3TextFilter(["program_id$name",
                                             "signature",
                                             ],
-                                        label = T("Search"),
-                                        ),
-                            S3DateFilter("date",
-                                        label = T("Date"),
-                                        ),
-                            ]
+                                           label = T("Search"),
+                                           ),
+                              S3DateFilter("date",
+                                           label = T("Date"),
+                                           ),
+                              ]
             s3db.configure("fin_voucher_debit",
                            filter_widgets = filter_widgets,
                            )
 
         # Report options
         if r.method == "report":
-            facts = ((T("Number of Accepted Vouchers"), "count(id)"),
-                    )
+            facts = ((T("Total Services Rendered"), "sum(quantity)"),
+                     (T("Number of Accepted Vouchers"), "count(id)"),
+                     (T("Remaining Compensation Claims"), "sum(balance)"),
+                     )
             axes = ["program_id",
-                    "balance",
+                    "status",
                     ]
             if current.auth.s3_has_role("PROGRAM_MANAGER"):
                 axes.insert(0, "pe_id")
@@ -756,10 +1013,10 @@ def config(settings):
                 "cols": axes,
                 "fact": facts,
                 "defaults": {"rows": axes[0],
-                            "cols": None,
-                            "fact": facts[0],
-                            "totals": True,
-                            },
+                             "cols": None,
+                             "fact": facts[0],
+                             "totals": True,
+                             },
                 }
             s3db.configure("fin_voucher_debit",
                            report_options = report_options,
@@ -772,6 +1029,9 @@ def config(settings):
 
         s3 = current.response.s3
 
+        # Enable bigtable features
+        settings.base.bigtable = True
+
         # Custom prep
         standard_prep = s3.prep
         def prep(r):
@@ -781,10 +1041,24 @@ def config(settings):
             db = current.db
             s3db = current.s3db
 
-            # Check which programs and organisations the user can accept vouchers for
-            program_ids, org_ids, pe_ids = s3db.fin_voucher_permitted_programs(mode="provider")
-
             resource = r.resource
+
+            has_role = current.auth.s3_has_role
+            if has_role("PROGRAM_ACCOUNTANT") and not has_role("PROGRAM_MANAGER"):
+
+                # PROGRAM_ACCOUNTANT can only see debits where they are assigned
+                # for the billing process
+                from .helpers import get_role_realms
+                role_realms = get_role_realms("PROGRAM_ACCOUNTANT")
+                if role_realms is not None:
+                    query = FS("billing_id$organisation_id$pe_id").belongs(role_realms)
+                    resource.add_filter(query)
+
+            # Check which programs and organisations the user can accept vouchers for
+            program_ids, org_ids, pe_ids = s3db.fin_voucher_permitted_programs(
+                                                        mode = "provider",
+                                                        partners_only = True,
+                                                        )
             table = resource.table
 
             if not program_ids or not org_ids:
@@ -819,6 +1093,16 @@ def config(settings):
                     field.default = rows.first().pe_id
                     field.readable = field.writable = False
 
+                # Always show quantity
+                if r.record:
+                    field = table.quantity
+                    field.readable = True
+
+            if r.interactive:
+
+                if r.get_vars.get("g") == "1":
+                    s3.crud_strings["fin_voucher_debit"]["label_create"] = T("Accept Group Voucher")
+
             return result
         s3.prep = prep
 
@@ -829,6 +1113,468 @@ def config(settings):
         return attr
 
     settings.customise_fin_voucher_debit_controller = customise_fin_voucher_debit_controller
+
+    # -------------------------------------------------------------------------
+    def customise_fin_voucher_program_resource(r, tablename):
+
+        table = current.s3db.fin_voucher_program
+
+        represent = lambda v, row=None: -v if v else current.messages["NONE"]
+
+        field = table.credit
+        field.label = T("Pending Credits")
+        field.represent = represent
+
+        field = table.compensation
+        field.label = T("Pending Compensation Claims")
+        field.represent = represent
+
+    settings.customise_fin_voucher_program_resource = customise_fin_voucher_program_resource
+
+    # -------------------------------------------------------------------------
+    def customise_fin_voucher_program_controller(**attr):
+
+        s3 = current.response.s3
+
+        # Enable bigtable features
+        settings.base.bigtable = True
+
+        # Custom prep
+        standard_prep = s3.prep
+        def prep(r):
+            # Call standard prep
+            result = standard_prep(r) if callable(standard_prep) else True
+
+            resource = r.resource
+
+            has_role = current.auth.s3_has_role
+            if has_role("PROGRAM_ACCOUNTANT") and not has_role("PROGRAM_MANAGER"):
+
+                # PROGRAM_ACCOUNTANT can only see programs where they are
+                # assigned for a billing process
+                from .helpers import get_role_realms
+                role_realms = get_role_realms("PROGRAM_ACCOUNTANT")
+                if role_realms is not None:
+                    query = FS("voucher_billing.organisation_id$pe_id").belongs(role_realms)
+                    resource.add_filter(query)
+
+            return result
+        s3.prep = prep
+
+        return attr
+
+    settings.customise_fin_voucher_program_controller = customise_fin_voucher_program_controller
+
+    # -------------------------------------------------------------------------
+    def billing_onaccept(form):
+        """
+            Custom onaccept of billing:
+            - make sure all invoices are owned by the accountant
+              organisation (as long as they are the accountants in charge)
+        """
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        db = current.db
+        s3db = current.s3db
+
+        # Get the billing/program organisations
+        table = s3db.fin_voucher_billing
+        ptable = s3db.fin_voucher_program
+        left = ptable.on((ptable.id == table.program_id) & \
+                         (ptable.deleted == False))
+        query = (table.id == record_id)
+        row = db(query).select(table.id,
+                               table.organisation_id,
+                               ptable.organisation_id,
+                               left = left,
+                               limitby = (0, 1),
+                               ).first()
+        if not row:
+            return
+
+        # Identify the organisation to own the invoices under this process
+        billing = row.fin_voucher_billing
+        organisation_id = billing.organisation_id
+        if not organisation_id:
+            organisation_id = row.fin_voucher_program.organisation_id
+
+        # Update the realm entity as needed
+        if organisation_id:
+            pe_id = s3db.pr_get_pe_id("org_organisation", organisation_id)
+            itable = s3db.fin_voucher_invoice
+            query = (itable.billing_id == billing.id) & \
+                    (itable.realm_entity != pe_id) & \
+                    (itable.deleted == False)
+            current.auth.set_realm_entity(itable,
+                                          query,
+                                          entity = pe_id,
+                                          force_update = True,
+                                          )
+
+    # -------------------------------------------------------------------------
+    def customise_fin_voucher_billing_resource(r, tablename):
+
+        s3db = current.s3db
+        table = current.s3db.fin_voucher_billing
+
+        # Color-coded representation of billing process status
+        from s3 import S3PriorityRepresent
+        field = table.status
+        try:
+            status_opts = field.represent.options
+        except AttributeError:
+            pass
+        else:
+            field.represent = S3PriorityRepresent(status_opts,
+                                                  {"SCHEDULED": "lightblue",
+                                                   "IN PROGRESS": "amber",
+                                                   "ABORTED": "black",
+                                                   "COMPLETE": "green",
+                                                   }).represent
+
+        # Custom onaccept to maintain realm-assignment of invoices
+        # when accountant organisation changes
+        s3db.add_custom_callback("fin_voucher_billing",
+                                 "onaccept",
+                                 billing_onaccept,
+                                 )
+
+    settings.customise_fin_voucher_billing_resource = customise_fin_voucher_billing_resource
+
+    # -------------------------------------------------------------------------
+    def claim_create_onaccept(form):
+        """
+            Custom create-onaccept for claim to notify the provider
+            accountant about the new claim
+        """
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        db = current.db
+        s3db = current.s3db
+
+        table = s3db.fin_voucher_claim
+        btable = s3db.fin_voucher_billing
+        ptable = s3db.fin_voucher_program
+        join = [ptable.on(ptable.id == table.program_id),
+                btable.on(btable.id == table.billing_id),
+                ]
+        query = (table.id == record_id)
+        row = db(query).select(table.id,
+                               table.program_id,
+                               table.billing_id,
+                               table.pe_id,
+                               table.status,
+                               btable.date,
+                               ptable.name,
+                               ptable.organisation_id,
+                               join = join,
+                               limitby = (0, 1),
+                               ).first()
+        if not row:
+            return
+        program = row.fin_voucher_program
+        billing = row.fin_voucher_billing
+        claim = row.fin_voucher_claim
+
+        if claim.status != "NEW":
+            return
+
+        error = None
+
+        # Look up the provider organisation
+        pe_id = claim.pe_id
+        otable = s3db.org_organisation
+        provider = db(otable.pe_id == pe_id).select(otable.id,
+                                                    otable.name,
+                                                    limitby = (0, 1),
+                                                    ).first()
+
+        from .helpers import get_role_contacts
+        provider_accountants = get_role_contacts("PROVIDER_ACCOUNTANT", pe_id)
+        if not provider_accountants:
+            error = "No provider accountant found"
+
+        if not error:
+            # Lookup the template variables
+            base_url = current.deployment_settings.get_base_public_url()
+            appname = current.request.application
+            data = {"program": program.name,
+                    "date": btable.date.represent(billing.date),
+                    "organisation": provider.name,
+                    "url": "%s/%s/fin/voucher_claim/%s" % (base_url, appname, claim.id),
+                    }
+
+            # Send the email notification
+            from .notifications import CMSNotifications
+            error = CMSNotifications.send(provider_accountants,
+                                          "ClaimNotification",
+                                          data,
+                                          module = "fin",
+                                          resource = "voucher_claim",
+                                          )
+        if error:
+            # Inform the program manager that the provider could not be notified
+            msg = T("%(name)s could not be notified of new compensation claim: %(error)s") % \
+                  {"name": provider.name, "error": error}
+            program_managers = get_role_contacts("PROGRAM_MANAGER",
+                                                 organisation_id = program.organisation_id,
+                                                 )
+            if program_managers:
+                current.msg.send_email(to = program_managers,
+                                       subject = T("Provider Notification Failed"),
+                                       message = msg,
+                                       )
+            current.log.error(msg)
+        else:
+            current.log.debug("Provider '%s' notified about new compensation claim" % provider.name)
+
+    # -------------------------------------------------------------------------
+    def customise_fin_voucher_claim_resource(r, tablename):
+
+        auth = current.auth
+        s3db = current.s3db
+
+        table = s3db.fin_voucher_claim
+
+        is_provider_accountant = auth.s3_has_role("PROVIDER_ACCOUNTANT")
+
+        if not is_provider_accountant:
+            # Hide comments
+            field = table.comments
+            field.readable = field.writable = False
+
+        # Color-coded representation of claim status
+        from s3 import S3PriorityRepresent
+        field = table.status
+        try:
+            status_opts = field.represent.options
+        except AttributeError:
+            pass
+        else:
+            field.represent = S3PriorityRepresent(status_opts,
+                                                  {"NEW": "lightblue",
+                                                   "CONFIRMED": "blue",
+                                                   "INVOICED": "amber",
+                                                   "PAID": "green",
+                                                   }).represent
+
+        # Custom list fields
+        list_fields = [#"refno",
+                       "date",
+                       "program_id",
+                       #"pe_id",
+                       "vouchers_total",
+                       "quantity_total",
+                       "amount_receivable",
+                       "currency",
+                       "status",
+                       ]
+        if is_provider_accountant:
+            list_fields.insert(0, "refno")
+            text_fields = ["refno",
+                           "comments",
+                           ]
+        else:
+            list_fields.insert(2, "pe_id")
+            text_fields = ["pe_id$pe_id:org_organisation.name",
+                           ]
+
+        # Filter widgets
+        from s3 import S3TextFilter, S3OptionsFilter, s3_get_filter_opts
+        filter_widgets = [S3TextFilter(text_fields,
+                                       label = T("Search"),
+                                       ),
+                          S3OptionsFilter("program_id",
+                                          options = lambda: s3_get_filter_opts("fin_voucher_program"),
+                                          ),
+                          ]
+
+        s3db.configure("fin_voucher_claim",
+                       filter_widgets = filter_widgets,
+                       list_fields = list_fields,
+                       )
+        s3db.add_custom_callback("fin_voucher_claim",
+                                 "onaccept",
+                                 claim_create_onaccept,
+                                 method = "create",
+                                 )
+
+    settings.customise_fin_voucher_claim_resource = customise_fin_voucher_claim_resource
+
+    # -------------------------------------------------------------------------
+    def invoice_onsettled(invoice):
+        """
+            Callback to notify the provider that an invoice has been settled
+
+            @param invoice: the invoice (Row)
+        """
+
+        db = current.db
+        s3db = current.s3db
+
+        # Look up claim, invoice number, program and billing
+        btable = s3db.fin_voucher_billing
+        ctable = s3db.fin_voucher_claim
+        itable = s3db.fin_voucher_invoice
+        ptable = s3db.fin_voucher_program
+        join = [ptable.on(ptable.id == ctable.program_id),
+                btable.on(btable.id == ctable.billing_id),
+                itable.on(itable.id == ctable.invoice_id),
+                ]
+        query = (ctable.invoice_id == invoice.id) & \
+                (ctable.deleted == False)
+        row = db(query).select(ctable.id,
+                               ctable.program_id,
+                               ctable.billing_id,
+                               ctable.pe_id,
+                               btable.date,
+                               itable.invoice_no,
+                               ptable.name,
+                               ptable.organisation_id,
+                               join = join,
+                               limitby = (0, 1),
+                               ).first()
+        if not row:
+            return
+        program = row.fin_voucher_program
+        billing = row.fin_voucher_billing
+        claim = row.fin_voucher_claim
+        invoice_no = row.fin_voucher_invoice.invoice_no
+
+        error = None
+
+        # Look up the provider organisation
+        pe_id = claim.pe_id
+        otable = s3db.org_organisation
+        provider = db(otable.pe_id == pe_id).select(otable.id,
+                                                    otable.name,
+                                                    limitby = (0, 1),
+                                                    ).first()
+
+        from .helpers import get_role_contacts
+        provider_accountants = get_role_contacts("PROVIDER_ACCOUNTANT", pe_id)
+        if not provider_accountants:
+            error = "No provider accountant found"
+
+        if not error:
+            # Lookup the template variables
+            base_url = current.deployment_settings.get_base_public_url()
+            appname = current.request.application
+            data = {"program": program.name,
+                    "date": btable.date.represent(billing.date),
+                    "invoice": invoice_no,
+                    "organisation": provider.name,
+                    "url": "%s/%s/fin/voucher_claim/%s" % (base_url, appname, claim.id),
+                    }
+
+            # Send the email notification
+            from .notifications import CMSNotifications
+            error = CMSNotifications.send(provider_accountants,
+                                          "InvoiceSettled",
+                                          data,
+                                          module = "fin",
+                                          resource = "voucher_invoice",
+                                          )
+        if error:
+            msg = "%s could not be notified about invoice settlement: %s"
+            current.log.error(msg % (provider.name, error))
+        else:
+            msg = "%s notified about invoice settlement"
+            current.log.debug(msg % provider.name)
+
+    # -------------------------------------------------------------------------
+    def customise_fin_voucher_invoice_resource(r, tablename):
+
+        s3db = current.s3db
+
+        table = s3db.fin_voucher_invoice
+
+        # Color-coded representation of invoice status
+        from s3 import S3PriorityRepresent
+        field = table.status
+        try:
+            status_opts = field.represent.options
+        except AttributeError:
+            pass
+        else:
+            field.represent = S3PriorityRepresent(status_opts,
+                                                  {"NEW": "lightblue",
+                                                   "APPROVED": "blue",
+                                                   "REJECTED": "red",
+                                                   "PAID": "green",
+                                                   }).represent
+
+        # PDF export method
+        from .helpers import InvoicePDF
+        s3db.set_method("fin", "voucher_invoice",
+                        method = "record",
+                        action = InvoicePDF,
+                        )
+
+        # Callback when invoice is settled
+        s3db.configure("fin_voucher_invoice",
+                       onsettled = invoice_onsettled,
+                       )
+
+    settings.customise_fin_voucher_invoice_resource = customise_fin_voucher_invoice_resource
+
+    # -------------------------------------------------------------------------
+    def customise_fin_voucher_invoice_controller(**attr):
+
+        s3 = current.response.s3
+
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if not r.component and isinstance(output, dict):
+                if r.record and r.method in (None, "update", "read"):
+
+                    # Custom CRUD buttons
+                    if "buttons" not in output:
+                        buttons = output["buttons"] = {}
+                    else:
+                        buttons = output["buttons"]
+
+                    # PDF-button
+                    pdf_download = A(T("Download PDF"),
+                                     _href = "/%s/fin/voucher_invoice/%s/record.pdf" % \
+                                             (r.application, r.record.id),
+                                     _class="action-btn",
+                                     )
+
+                    # Render in place of the delete-button
+                    buttons["delete_btn"] = TAG[""](pdf_download,
+                                                    )
+            return output
+        s3.postp = custom_postp
+
+        # Custom rheader
+        from .rheaders import rlpptm_fin_rheader
+        attr["rheader"] = rlpptm_fin_rheader
+
+        return attr
+
+    settings.customise_fin_voucher_invoice_controller = customise_fin_voucher_invoice_controller
 
     # -------------------------------------------------------------------------
     def customise_org_facility_resource(r, tablename):
@@ -857,6 +1603,7 @@ def config(settings):
                        "location_id$L2",
                        "location_id$L3",
                        "location_id$L4",
+                       "location_id$addr_postcode",
                        ]
 
         filter_widgets = [
@@ -881,6 +1628,7 @@ def config(settings):
                        #"organisation_id",
                        "location_id",
                        (T("Telephone"), "phone1"),
+                       "email",
                        (T("Opening Hours"), "opening_times"),
                        #"obsolete",
                        "comments",
@@ -889,6 +1637,7 @@ def config(settings):
         list_fields = ["name",
                        #"site_facility_type.facility_type_id",
                        (T("Telephone"), "phone1"),
+                       "email",
                        (T("Opening Hours"), "opening_times"),
                        "location_id$addr_street",
                        "location_id$addr_postcode",
@@ -925,15 +1674,32 @@ def config(settings):
             # Call standard prep
             result = standard_prep(r) if callable(standard_prep) else True
 
+            resource = r.resource
+
             record = r.record
-            if record:
+            if not record:
+                # Filter list by project code
+                # - re-use last used $$code filter of this session
+                # - default to original subset for consistency in bookmarks/links
+                session_s3 = current.session.s3
+                default_filter = session_s3.get("rlp_facility_filter", "TESTS-SCHOOLS")
+                code = r.get_vars.get("$$code", default_filter)
+                if code:
+                    session_s3.rlp_facility_filter = code
+                    query = FS("~.organisation_id$project.code") == code
+                    resource.add_filter(query)
+                    if code == "TESTS-SCHOOLS":
+                        s3.crud_strings.org_facility.title_list = T("Test Stations for School and Child Care Staff")
+                    elif code == "TESTS-PUBLIC":
+                        s3.crud_strings.org_facility.title_list = T("Test Stations for Everybody")
+            else:
                 s3db = current.s3db
                 auth = current.auth
                 if not auth.s3_has_role("ORG_GROUP_ADMIN") and \
                    not auth.s3_has_role("ORG_ADMIN", for_pe=record.pe_id):
                     s3.hide_last_update = True
 
-                    table = r.resource.table
+                    table = resource.table
 
                     field = table.obsolete
                     field.readable = field.writable = False
@@ -941,15 +1707,16 @@ def config(settings):
                     field = table.organisation_id
                     field.represent = s3db.org_OrganisationRepresent(show_link=False)
 
-            settings.ui.summary = ({"name": "table",
-                                    "label": "Table",
-                                    "widgets": [{"method": "datatable"}]
-                                    },
-                                   {"name": "map",
-                                    "label": "Map",
-                                    "widgets": [{"method": "map", "ajax_init": True}],
-                                    },
-                                   )
+            resource.configure(summary = ({"name": "table",
+                                           "label": "Table",
+                                           "widgets": [{"method": "datatable"}]
+                                           },
+                                          {"name": "map",
+                                           "label": "Map",
+                                           "widgets": [{"method": "map", "ajax_init": True}],
+                                           },
+                                          ),
+                               )
 
             return result
         s3.prep = prep
@@ -972,6 +1739,9 @@ def config(settings):
 
         s3 = current.response.s3
 
+        # Enable bigtable features
+        settings.base.bigtable = True
+
         # Custom prep
         standard_prep = s3.prep
         def prep(r):
@@ -984,10 +1754,10 @@ def config(settings):
             is_org_group_admin = auth.s3_has_role("ORG_GROUP_ADMIN")
 
             # Add invite-method for ORG_GROUP_ADMIN role
-            from .helpers import rlpptm_InviteUserOrg
+            from .helpers import InviteUserOrg
             s3db.set_method("org", "organisation",
                             method = "invite",
-                            action = rlpptm_InviteUserOrg,
+                            action = InviteUserOrg,
                             )
 
             resource = r.resource
@@ -1016,23 +1786,56 @@ def config(settings):
 
             if not r.component:
                 if r.interactive:
+
+                    ltable = s3db.project_organisation
+                    field = ltable.project_id
+                    field.represent = S3Represent(lookup="project_project")
+
                     from s3 import S3SQLCustomForm, \
                                    S3SQLInlineComponent, \
-                                   S3SQLInlineLink
+                                   S3SQLInlineLink, \
+                                   S3OptionsFilter, \
+                                   S3TextFilter, \
+                                   s3_get_filter_opts
 
                     # Custom form
-                    crud_fields = ["name",
+                    if is_org_group_admin:
+                        record = r.record
+                        user = auth.user
+                        if record and user:
+                            # Only OrgGroupAdmins managing this organisation can change
+                            # its org group membership (=organisation must be within realm):
+                            realm = user.realms.get(auth.get_system_roles().ORG_GROUP_ADMIN)
+                            groups_readonly = realm is not None and record.pe_id not in realm
+                        else:
+                            groups_readonly = False
+
+                        groups = S3SQLInlineLink("group",
+                                                 field = "group_id",
+                                                 label = T("Organization Group"),
+                                                 multiple = False,
+                                                 readonly = groups_readonly,
+                                                 )
+                        projects = S3SQLInlineLink("project",
+                                                   field = "project_id",
+                                                   label = T("Project Partner for"),
+                                                   cols = 1,
+                                                   )
+                        types = S3SQLInlineLink("organisation_type",
+                                                field = "organisation_type_id",
+                                                search = False,
+                                                label = T("Type"),
+                                                multiple = settings.get_org_organisation_types_multiple(),
+                                                widget = "multiselect",
+                                                )
+                    else:
+                        groups = projects = types = None
+
+                    crud_fields = [groups,
+                                   projects,
+                                   "name",
                                    "acronym",
-                                   # TODO Activate after correct type prepop
-                                   #S3SQLInlineLink(
-                                   #     "organisation_type",
-                                   #     field = "organisation_type_id",
-                                   #     search = False,
-                                   #     label = T("Type"),
-                                   #     multiple = settings.get_org_organisation_types_multiple(),
-                                   #     widget = "multiselect",
-                                   #     ),
-                                   #"country",
+                                   types,
                                    S3SQLInlineComponent(
                                         "contact",
                                         fields = [("", "value")],
@@ -1045,20 +1848,11 @@ def config(settings):
                                         ),
                                    "phone",
                                    "website",
-                                   #"year",
                                    "logo",
                                    "comments",
                                    ]
-                    if is_org_group_admin:
-                        crud_fields.insert(0, S3SQLInlineLink(
-                                                    "group",
-                                                    field = "group_id",
-                                                    label = T("Organization Group"),
-                                                    multiple = False,
-                                                    ))
 
                     # Filters
-                    from s3 import S3OptionsFilter, S3TextFilter, s3_get_filter_opts
                     text_fields = ["name", "acronym", "website", "phone"]
                     if is_org_group_admin:
                         text_fields.append("email.value")
@@ -1067,10 +1861,18 @@ def config(settings):
                                                    ),
                                       ]
                     if is_org_group_admin:
-                        filter_widgets.append(S3OptionsFilter("group__link.group_id",
-                                                              label = T("Group"),
-                                                              options = lambda: s3_get_filter_opts("org_group"),
-                                                              ))
+                        filter_widgets.extend([
+                            S3OptionsFilter(
+                                "group__link.group_id",
+                                label = T("Group"),
+                                options = lambda: s3_get_filter_opts("org_group"),
+                                ),
+                            S3OptionsFilter(
+                                "organisation_type__link.organisation_type_id",
+                                label = T("Type"),
+                                options = lambda: s3_get_filter_opts("org_organisation_type"),
+                                ),
+                            ])
 
                     resource.configure(crud_form = S3SQLCustomForm(*crud_fields),
                                        filter_widgets = filter_widgets,
@@ -1080,13 +1882,13 @@ def config(settings):
                 list_fields = [#"group__link.group_id",
                                "name",
                                "acronym",
-                               # TODO Activate after correct type prepop
                                #"organisation_type__link.organisation_type_id",
                                "website",
                                "phone",
                                #"email.value"
                                ]
                 if is_org_group_admin:
+                    list_fields.insert(2, (T("Type"), "organisation_type__link.organisation_type_id"))
                     list_fields.insert(0, (T("Organization Group"), "group__link.group_id"))
                     list_fields.append((T("Email"), "email.value"))
                 r.resource.configure(list_fields = list_fields,
@@ -1105,6 +1907,114 @@ def config(settings):
     settings.customise_org_organisation_controller = customise_org_organisation_controller
 
     # -------------------------------------------------------------------------
+    def customise_project_project_resource(r, tablename):
+
+        s3db = current.s3db
+
+        # Expose code field
+        table = s3db.project_project
+        field = table.code
+        field.readable = field.writable = True
+
+        # Tags as filtered components (for embedding in form)
+        s3db.add_components("project_project",
+                            project_project_tag = ({"name": "apply",
+                                                    "joinby": "project_id",
+                                                    "filterby": {"tag": "APPLY"},
+                                                    "multiple": False,
+                                                    },
+                                                   {"name": "stats",
+                                                    "joinby": "project_id",
+                                                    "filterby": {"tag": "STATS"},
+                                                    "multiple": False,
+                                                    },
+                                                   ),
+                            )
+
+        from s3 import S3SQLCustomForm, \
+                       S3TextFilter, \
+                       S3OptionsFilter
+
+        # Custom CRUD Form
+        crud_fields = ["organisation_id",
+                       "name",
+                       (T("Code"), "code"),
+                       "description",
+                       (T("Provider Self-Registration"), "apply.value"),
+                       (T("Test Results Statistics"), "stats.value"),
+                       "comments",
+                       ]
+
+        # Custom list fields
+        list_fields = ["id",
+                       "organisation_id",
+                       "name",
+                       (T("Code"), "code"),
+                       ]
+
+        # Custom filters
+        filter_widgets = [S3TextFilter(["name",
+                                        "code",
+                                        ],
+                                       label = T("Search"),
+                                       ),
+                          S3OptionsFilter("organisation_id",
+                                          ),
+                          ]
+
+        s3db.configure("project_project",
+                       crud_form = S3SQLCustomForm(*crud_fields),
+                       filter_widgets = filter_widgets,
+                       list_fields = list_fields,
+                       )
+
+    settings.customise_project_project_resource = customise_project_project_resource
+
+    # -------------------------------------------------------------------------
+    def customise_project_project_controller(**attr):
+
+        s3 = current.response.s3
+
+        # Custom prep
+        standard_prep = s3.prep
+        def prep(r):
+            # Call standard prep
+            result = standard_prep(r) if callable(standard_prep) else True
+
+            resource = r.resource
+
+            # Configure binary tags
+            binary_tag_opts = {"Y": T("Yes"), "N": T("No")}
+            for cname in ("apply", "stats"):
+                component = resource.components.get(cname)
+                table = component.table
+                field = table.value
+                field.requires = IS_IN_SET(binary_tag_opts,
+                                        zero = None,
+                                        )
+                field.represent = lambda v, row=None: binary_tag_opts.get(v, "-")
+
+            if r.component_name == "organisation":
+
+                table = r.component.table
+                field = table.amount
+                field.readable = field.writable = False
+
+                field = table.currency
+                field.readable = field.writable = False
+
+            return result
+        s3.prep = prep
+
+        # Custom rheader
+        from .rheaders import rlpptm_project_rheader
+        attr["rheader"] = rlpptm_project_rheader
+
+        return attr
+
+    settings.customise_project_project_controller = customise_project_project_controller
+
+    # -------------------------------------------------------------------------
     def customise_pr_person_controller(**attr):
 
         s3 = current.response.s3
@@ -1115,7 +2025,6 @@ def config(settings):
             # Call standard prep
             result = standard_prep(r) if callable(standard_prep) else True
 
-            from gluon import IS_NOT_EMPTY
             from s3 import S3SQLCustomForm, \
                            StringTemplateParser
 
@@ -1148,6 +2057,972 @@ def config(settings):
         return attr
 
     settings.customise_pr_person_controller = customise_pr_person_controller
+
+    # -------------------------------------------------------------------------
+    def customise_inv_recv_resource(r, tablename):
+
+        s3db = current.s3db
+
+        table = s3db.inv_recv
+
+        from .requests import ShipmentCodeRepresent
+        field = table.req_ref
+        field.label = T("Order No.")
+        field.represent = ShipmentCodeRepresent("req_req", "req_ref")
+
+        field = table.send_ref
+        field.represent = lambda v, row=None: B(v if v else "-")
+
+        if r.tablename == "inv_recv" and not r.component:
+            if r.interactive:
+                from s3 import S3SQLCustomForm
+                crud_fields = ["req_ref",
+                               "send_ref",
+                               "site_id",
+                               "status",
+                               "recipient_id",
+                               "date",
+                               "comments",
+                               ]
+                s3db.configure("inv_recv",
+                               crud_form = S3SQLCustomForm(*crud_fields),
+                               )
+
+            list_fields = ["req_ref",
+                           "send_ref",
+                           "site_id",
+                           "date",
+                           "status",
+                           ]
+
+            s3db.configure("inv_recv",
+                        list_fields = list_fields,
+                        )
+
+    settings.customise_inv_recv_resource = customise_inv_recv_resource
+
+    # -------------------------------------------------------------------------
+    def customise_inv_recv_controller(**attr):
+
+        db = current.db
+
+        auth = current.auth
+        s3db = current.s3db
+
+        s3 = current.response.s3
+
+        # Custom prep
+        standard_prep = s3.prep
+        def prep(r):
+            # Call standard prep
+            result = standard_prep(r) if callable(standard_prep) else True
+
+            resource = r.resource
+            table = resource.table
+
+            component = r.component
+
+            if not component:
+
+                # Hide unused fields
+                unused = ("type",
+                          "organisation_id",
+                          "from_site_id",
+                          "purchase_ref",
+                          "recv_ref",
+                          )
+                for fn in unused:
+                    field = table[fn]
+                    field.readable = field.writable = False
+
+                field = table.recipient_id
+                field.widget = None
+                record = r.record
+                if record and record.recipient_id:
+                    accepted_recipients = {record.recipient_id}
+                else:
+                    accepted_recipients = set()
+                user_person_id = auth.s3_logged_in_person()
+                if user_person_id:
+                    field.default = user_person_id
+                    accepted_recipients.add(user_person_id)
+                dbset = db(s3db.pr_person.id.belongs(accepted_recipients))
+                field.requires = IS_ONE_OF(dbset, "pr_person.id", field.represent)
+
+                if r.interactive:
+                    from .requests import recv_filter_widgets
+                    resource.configure(filter_widgets = recv_filter_widgets())
+
+            elif component.tablename == "inv_track_item":
+
+                itable = component.table
+
+                field = itable.item_id
+                field.writable = False
+
+                # Use custom form
+                from s3 import S3SQLCustomForm
+                crud_fields = ["item_id",
+                               "item_pack_id",
+                               "quantity",
+                               "recv_quantity"
+                               ]
+
+                # Custom list fields
+                list_fields = ["item_id",
+                               "item_pack_id",
+                               "quantity",
+                               "recv_quantity",
+                               "status",
+                               ]
+
+                component.configure(crud_form = S3SQLCustomForm(*crud_fields),
+                                    list_fields = list_fields,
+                                    )
+            return result
+        s3.prep = prep
+
+        from .rheaders import rlpptm_inv_rheader
+        attr["rheader"] = rlpptm_inv_rheader
+
+        return attr
+
+    settings.customise_inv_recv_controller = customise_inv_recv_controller
+
+    # -------------------------------------------------------------------------
+    def customise_inv_send_resource(r, tablename):
+
+        s3db = current.s3db
+
+        table = s3db.inv_send
+
+        from .requests import ShipmentCodeRepresent
+
+        field = table.req_ref
+        field.label = T("Order No.")
+        field.represent = ShipmentCodeRepresent("req_req", "req_ref")
+
+        field = table.send_ref
+        field.represent = ShipmentCodeRepresent("inv_send", "send_ref",
+                                                show_link = False,
+                                                )
+
+        list_fields = ["id",
+                       "req_ref",
+                       "send_ref",
+                       "date",
+                       "to_site_id",
+                       "status",
+                       ]
+
+        s3db.configure("inv_send",
+                       list_fields = list_fields,
+                       )
+
+        # Do not check for site_id (unused)
+        s3db.clear_config("inv_send", "onvalidation")
+
+    settings.customise_inv_send_resource = customise_inv_send_resource
+
+    # -------------------------------------------------------------------------
+    def customise_inv_send_controller(**attr):
+
+        db = current.db
+
+        auth = current.auth
+        s3db = current.s3db
+
+        s3 = current.response.s3
+
+        # Custom prep
+        standard_prep = s3.prep
+        def prep(r):
+            # Call standard prep
+            result = standard_prep(r) if callable(standard_prep) else True
+
+            resource = r.resource
+            table = resource.table
+
+            component = r.component
+
+            if not component:
+                record = r.record
+
+                # Hide unused fields
+                unused = ("site_id",
+                          "organisation_id",
+                          "type",
+                          "driver_name",
+                          "driver_phone",
+                          "vehicle_plate_no",
+                          "time_out",
+                          "delivery_date",
+                          )
+                for fn in unused:
+                    field = table[fn]
+                    field.readable = field.writable = False
+
+                # Shipment reference must be editable while the shipment
+                # is still editable
+                field = table.send_ref
+                field.readable = field.writable = True
+                field.requires = IS_NOT_ONE_OF(db, "inv_send.send_ref",
+                                               error_message = T("Specify a unique reference number"),
+                                               )
+
+                # Request number, on the other hand, should not be editable
+                field = table.req_ref
+                field.readable = bool(record)
+                field.writable = False
+
+                # Sender is always the current user
+                # => allow editing only if sender_id is missing
+                field = table.sender_id
+                field.widget = None
+                record = r.record
+                if record and record.sender_id:
+                    accepted_senders = {record.sender_id}
+                else:
+                    accepted_senders = set()
+                user_person_id = auth.s3_logged_in_person()
+                if user_person_id:
+                    field.default = user_person_id
+                    accepted_senders.add(user_person_id)
+                dbset = db(s3db.pr_person.id.belongs(accepted_senders))
+                field.requires = IS_ONE_OF(dbset, "pr_person.id", field.represent)
+
+                # Recipient should already have been set from request
+                # => allow editing only that hasn't happened yet
+                field = table.recipient_id
+                # TODO allow editing but look up acceptable recipients
+                #      from organisation of the receiving site
+                field.writable = False
+                field.readable = record and record.recipient_id
+                field.widget = None
+
+                if r.interactive:
+                    from .requests import send_filter_widgets
+                    resource.configure(filter_widgets = send_filter_widgets())
+
+            elif component.tablename == "inv_track_item":
+
+                itable = component.table
+
+                field = itable.item_id
+                field.readable = field.writable = True
+
+                if r.component_id:
+                    # If this item is linked to a request item, don't allow
+                    # to switch to another supply item
+                    query = (itable.id == r.component_id)
+                    item = db(query).select(itable.req_item_id,
+                                            limitby = (0, 1),
+                                            ).first()
+                    if item and item.req_item_id:
+                        field.writable = False
+
+                    # ...however, the item quantity can still be adjusted
+                    # => override IS_AVAILABLE_QUANTITY here as we don't
+                    #    have an inventory item to check against
+                    field = itable.quantity
+                    field.requires = IS_FLOAT_AMOUNT(0)
+
+                # Use custom form
+                from s3 import S3SQLCustomForm
+                crud_fields = ["item_id",
+                               "item_pack_id",
+                               "quantity",
+                               ]
+
+                # Custom list fields
+                list_fields = ["item_id",
+                               "item_pack_id",
+                               "quantity",
+                               "recv_quantity",
+                               "status",
+                               ]
+
+                component.configure(crud_form = S3SQLCustomForm(*crud_fields),
+                                    list_fields = list_fields,
+                                    )
+
+
+            return result
+        s3.prep = prep
+
+        from .rheaders import rlpptm_inv_rheader
+        attr["rheader"] = rlpptm_inv_rheader
+
+        return attr
+
+    settings.customise_inv_send_controller = customise_inv_send_controller
+
+    # -------------------------------------------------------------------------
+    def inv_track_item_onaccept(form):
+        """
+           Custom-onaccept for inv_track_item
+           - based on standard inv_track_item_onaccept, but without the
+             stock item updates and adjustments
+        """
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        db = current.db
+        s3db = current.s3db
+
+        # Look up the track item record if not in form
+        ttable = s3db.inv_track_item
+        try:
+            record = form.record
+        except AttributeError:
+            record = None
+        if not record:
+            record = db(ttable.id == record_id).select(ttable.id,
+                                                       ttable.status,
+                                                       ttable.req_item_id,
+                                                       ttable.recv_quantity,
+                                                       ttable.item_pack_id,
+                                                       limitby = (0, 1),
+                                                       ).first()
+        if not record:
+            return
+
+        # Set send_ref in recv_record
+        send_id = form_vars.get("send_id")
+        recv_id = form_vars.get("recv_id")
+        recv_update = {}
+
+        if send_id and recv_id:
+            # Get the send_ref
+            stable = s3db.inv_send
+            send = db(stable.id == send_id).select(stable.send_ref,
+                                                   limitby = (0, 1)
+                                                   ).first().send_ref
+            # Note the send_ref for recv-update (we do that later)
+            recv_update["send_ref"] = send.send_ref
+
+        # Update the request
+        rrtable = s3db.req_req
+        ritable = s3db.req_req_item
+        iptable = db.supply_item_pack
+
+        # If this item is linked to a request, then copy the req_ref to the send item
+        req_item_id = record.req_item_id
+        req = req_item = None
+        if req_item_id:
+
+            # Look up the request item
+            left = rrtable.on(rrtable.id == ritable.req_id)
+            row = db(ritable.id == req_item_id).select(ritable.id,
+                                                       ritable.quantity_fulfil,
+                                                       ritable.item_pack_id,
+                                                       rrtable.id,
+                                                       rrtable.req_ref,
+                                                       left = left,
+                                                       limitby = (0, 1),
+                                                       ).first()
+            if row:
+                req = row.req_req
+                req_item = row.req_req_item
+                recv_update["req_ref"] = req.req_ref
+
+        # Update the recv-record with send and req references
+        if recv_id and recv_update:
+            rtable = s3db.inv_recv
+            db(rtable.id == recv_id).update(**recv_update)
+
+        # When item status is UNLOADING, update the request
+        from s3db.inv import TRACK_STATUS_UNLOADING, TRACK_STATUS_ARRIVED
+        recv_quantity = record.recv_quantity
+        if record.status == TRACK_STATUS_UNLOADING:
+
+            if req_item and recv_quantity:
+                # Update the fulfilled quantity of the req item
+                req_pack_id = req_item.item_pack_id
+                rcv_pack_id = record.item_pack_id
+                query = iptable.id.belongs((req_pack_id, rcv_pack_id))
+                packs = db(query).select(iptable.id,
+                                         iptable.quantity,
+                                         limitby = (0, 2),
+                                         ).as_dict(key="id")
+                req_pack_quantity = packs.get(req_pack_id)
+                rcv_pack_quantity = packs.get(rcv_pack_id)
+
+                if req_pack_quantity and rcv_pack_quantity:
+                    quantity_fulfil = s3db.supply_item_add(req_item.quantity_fulfil,
+                                                           req_pack_quantity,
+                                                           recv_quantity,
+                                                           rcv_pack_quantity,
+                                                           )
+                    req_item.update_record(quantity_fulfil = quantity_fulfil)
+
+                # Update the request status
+                s3db.req_update_status(req.id)
+
+            # Update the track item status to ARRIVED
+            db(ttable.id == record_id).update(status = TRACK_STATUS_ARRIVED)
+
+    # -------------------------------------------------------------------------
+    def customise_inv_track_item_resource(r, tablename):
+
+        s3db = current.s3db
+
+        table = s3db.inv_track_item
+
+        # Item selector using dropdown not autocomplete
+        field = table.item_id
+        field.widget = None
+        field.comment = None
+
+        field = table.send_id
+        field.label = T("Shipment")
+        field.represent = S3Represent(lookup = "inv_send",
+                                      fields = ["send_ref"],
+                                      show_link = True,
+                                      )
+
+        # Custom list fields
+        resource = r.resource
+        if resource.tablename == "supply_item":
+
+            # Custom form for record view (read-only)
+            field = table.recv_quantity
+            field.readable = True
+            from s3 import S3SQLCustomForm
+            crud_form = S3SQLCustomForm("item_id",
+                                        "send_id",
+                                        "item_pack_id",
+                                        "quantity",
+                                        "recv_quantity",
+                                        "status",
+                                        )
+
+            # List fields
+            list_fields = ["item_id",
+                           "send_id",
+                           "send_id$date",
+                           "send_id$to_site_id",
+                           "item_pack_id",
+                           "quantity",
+                           "recv_quantity",
+                           "status",
+                           ]
+
+            # Reconfigure - always r/o in this view
+            s3db.configure("inv_track_item",
+                           crud_form = crud_form,
+                           list_fields = list_fields,
+                           insertable = False,
+                           editable = False,
+                           deletable = False,
+                           )
+
+        # Override standard-onaccept to prevent inventory updates
+        s3db.configure("inv_track_item",
+                       onaccept = inv_track_item_onaccept,
+                       )
+
+    settings.customise_inv_track_item_resource = customise_inv_track_item_resource
+
+    # -------------------------------------------------------------------------
+    def customise_req_req_resource(r, tablename):
+
+        db = current.db
+
+        auth = current.auth
+        s3db = current.s3db
+
+        table = s3db.req_req
+
+        field = table.req_ref
+        field.label = T("Order No.")
+        #field.represent = lambda v, row=None: v if v else "-"
+
+        if auth.s3_has_role("SUPPLY_COORDINATOR"):
+            from .requests import RegisterShipment
+            s3db.set_method("req", "req",
+                            method = "ship",
+                            action = RegisterShipment,
+                            )
+
+        # Filter out obsolete items
+        ritable = s3db.req_req_item
+        sitable = s3db.supply_item
+        field = ritable.item_id
+        dbset = db((sitable.obsolete == False) | (sitable.obsolete == None))
+        field.requires = IS_ONE_OF(dbset, "supply_item.id",
+                                   field.represent,
+                                   sort = True,
+                                   )
+
+        # Customise error message for ordered quantity
+        field = ritable.quantity
+        field.requires = IS_FLOAT_AMOUNT(minimum = 1.0,
+                                         error_message = T("Minimum quantity is %(min)s"),
+                                         )
+
+    settings.customise_req_req_resource = customise_req_req_resource
+
+    # -------------------------------------------------------------------------
+    def customise_req_req_controller(**attr):
+
+        db = current.db
+        s3db = current.s3db
+        auth = current.auth
+
+        has_role = auth.s3_has_role
+
+        s3 = current.response.s3
+
+        # Custom prep
+        standard_prep = s3.prep
+        def prep(r):
+            # Call standard prep
+            result = standard_prep(r) if callable(standard_prep) else True
+
+            resource = r.resource
+            table = resource.table
+
+            record = r.record
+            if record:
+                # Check if there is any shipment for this request
+                ritable = s3db.req_req_item
+                titable = s3db.inv_track_item
+                join = titable.on((titable.req_item_id == ritable.id) & \
+                                  (titable.deleted == False))
+                query = (ritable.req_id == r.id) & \
+                        (ritable.deleted == False)
+                item = db(query).select(titable.id, join=join, limitby=(0, 1)).first()
+
+                if item:
+                    # Cannot edit the request
+                    resource.configure(editable = False, deletable = False)
+                    if r.component_name == "req_item":
+                        # ...nor its items
+                        r.component.configure(insertable = False,
+                                              editable = False,
+                                              deletable = False,
+                                              )
+
+            if not r.component:
+                if r.interactive:
+                    # Hide priority, date_required and date_recv
+                    field = table.priority
+                    field.readable = field.writable = False
+                    field = table.date_required
+                    field.readable = field.writable = False
+                    field = table.date_recv
+                    field.readable = field.writable = False
+
+                    # If only one site selectable, set default and make r/o
+                    field = table.site_id
+                    requires = field.requires
+                    if isinstance(requires, (list, tuple)):
+                        requires = requires[0]
+                    if hasattr(requires, "options"):
+                        options = [opt[0] for opt in requires.options() if opt[0]]
+                        if len(options) == 1:
+                            field.default = int(options[0])
+                            field.writable = False
+
+                    # Requester is always the current user
+                    # => set as default and make r/o
+                    user_person_id = auth.s3_logged_in_person()
+                    if user_person_id:
+                        field = table.requester_id
+                        field.default = user_person_id
+                        field.writable = False
+
+                    from .requests import req_filter_widgets
+                    resource.configure(filter_widgets = req_filter_widgets(),
+                                       )
+
+                # Custom list fields
+                list_fields = ["id",
+                               "req_ref",
+                               "date",
+                               "site_id",
+                               (T("Details"), "details"),
+                               "transit_status",
+                               "fulfil_status",
+                               ]
+
+                # Reconfigure table
+                resource.configure(list_fields = list_fields,
+                                   )
+
+                # Custom callback for inline items
+                s3db.add_custom_callback("req_req_item",
+                                         "onaccept",
+                                         req_req_item_create_onaccept,
+                                         method = "create",
+                                         )
+
+            if r.interactive and not record and has_role("SUPPLY_COORDINATOR"):
+                # Configure WWS export format
+                export_formats = list(settings.get_ui_export_formats())
+                export_formats.append(("wws", "fa fa-shopping-cart", T("CoronaWWS")))
+                s3.formats["wws"] = r.url(method="")
+                settings.ui.export_formats = export_formats
+
+            return result
+        s3.prep = prep
+
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+
+            # Call standard postp if on component tab
+            if r.component and callable(standard_postp):
+                output = standard_postp(r, output)
+
+            resource = r.resource
+
+            table = resource.table
+            from s3db.req import REQ_STATUS_COMPLETE, REQ_STATUS_CANCEL
+            request_complete = (REQ_STATUS_COMPLETE, REQ_STATUS_CANCEL)
+
+            stable = s3db.inv_send
+            from s3db.inv import SHIP_STATUS_IN_PROCESS, SHIP_STATUS_SENT
+            shipment_in_process = (SHIP_STATUS_IN_PROCESS, SHIP_STATUS_SENT)
+
+            record = r.record
+            if r.interactive and isinstance(output, dict):
+
+                # Add register-shipment action button(s)
+
+                ship_btn_label = s3_str(T("Register Shipment"))
+                inject_script = False
+                if record:
+                    # Single record view
+                    if not r.component and has_role("SUPPLY_COORDINATOR"):
+                        if record.fulfil_status not in request_complete:
+                            query = (stable.req_ref == record.req_ref) & \
+                                    (stable.status.belongs(shipment_in_process)) & \
+                                    (stable.deleted == False)
+                            shipment = db(query).select(stable.id, limitby=(0, 1)).first()
+                        else:
+                            shipment = None
+                        if not shipment:
+                            ship_btn = A(T("Register Shipment"),
+                                         _class = "action-btn ship-btn",
+                                         _db_id = str(record.id),
+                                         )
+                            inject_script = True
+                        else:
+                            ship_btn = A(T("Register Shipment"),
+                                         _class = "action-btn",
+                                         _disabled = "disabled",
+                                         _title = T("Shipment already in process"),
+                                         )
+                        if "buttons" not in output:
+                            buttons = output["buttons"] = {}
+                        else:
+                            buttons = output["buttons"]
+                        delete_btn = buttons.get("delete_btn")
+
+                        b = [delete_btn, ship_btn] if delete_btn else [ship_btn]
+                        buttons["delete_btn"] = TAG[""](*b)
+
+                elif not r.component and not r.method:
+                    # Datatable
+
+                    # Default action buttons (except delete)
+                    from s3 import S3CRUD
+                    S3CRUD.action_buttons(r, deletable =False)
+
+                    if has_role("SUPPLY_COORDINATOR"):
+                        # Can only register shipments for unfulfilled requests with
+                        # no shipment currently in process or in transit
+                        left = stable.on((stable.req_ref == table.req_ref) & \
+                                         (stable.status.belongs(shipment_in_process)) & \
+                                         (stable.deleted == False))
+                        query = (table.fulfil_status != REQ_STATUS_COMPLETE) & \
+                                (table.fulfil_status != REQ_STATUS_CANCEL) & \
+                                (stable.id == None)
+                        rows = db(query).select(table.id, groupby=table.id, left = left)
+                        restrict = [str(row.id) for row in rows]
+
+                        # Register-shipment button
+                        enabled = {"label": ship_btn_label,
+                                   "_class": "action-btn ship-btn",
+                                   "restrict": restrict,
+                                   }
+                        s3.actions.append(enabled)
+
+                        # Disabled shipment-button to indicate why the action
+                        # is currently disabled
+                        disabled = {"label": ship_btn_label,
+                                    "_class": "action-btn",
+                                    "_title": s3_str(T("Shipment already in process")),
+                                    "_disabled": "disabled",
+                                    "exclude": restrict,
+                                    }
+                        s3.actions.append(disabled)
+
+                        # Do inject script
+                        inject_script = True
+
+                    if auth.s3_has_permission("delete", table):
+                        # Requests can only be deleted while no shipment for them
+                        # has been registered yet:
+                        left = stable.on((stable.req_ref == table.req_ref) & \
+                                         (stable.deleted == False))
+                        query = auth.s3_accessible_query("delete", table) & \
+                                (stable.id == None)
+                        rows = db(query).select(table.id, left=left)
+
+                        # Delete-button
+                        if rows:
+                            delete = {"label": s3_str(s3.crud_labels.DELETE),
+                                      "url": URL(c="req", f="req", args=["[id]", "delete"]),
+                                      "_class": "delete-btn",
+                                      "restrict": [str(row.id) for row in rows],
+                                      }
+                            s3.actions.append(delete)
+
+                if inject_script:
+                    # Confirmation question
+                    confirm = '''i18n.req_register_shipment="%s"''' % \
+                              T("Do you want to register a shipment for this request?")
+                    s3.js_global.append(confirm)
+
+                    # Inject script for action
+                    script = "/%s/static/themes/RLP/js/ship.js" % r.application
+                    if script not in s3.scripts:
+                        s3.scripts.append(script)
+
+            elif r.representation == "wws":
+                # Deliver as attachment rather than as page content
+                from gluon.contenttype import contenttype
+
+                now = current.request.utcnow.strftime("%Y%m%d%H%M%S")
+                filename = "req%s.wws" % now
+                disposition = "attachment; filename=\"%s\"" % filename
+
+                response = current.response
+                response.headers["Content-Type"] = contenttype(".xml")
+                response.headers["Content-disposition"] = disposition
+
+            return output
+        s3.postp = custom_postp
+
+        from .rheaders import rlpptm_req_rheader
+        attr["rheader"] = rlpptm_req_rheader
+
+        return attr
+
+    settings.customise_req_req_controller = customise_req_req_controller
+
+    # -------------------------------------------------------------------------
+    def req_req_item_create_onaccept(form):
+        """
+            Custom callback to prevent duplicate request items:
+            - if the same request contains another req_item with the same
+              item_id and item_pack_id that is not yet referenced by a
+              shipment item, then merge the quantities and delete this
+              one
+        """
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        db = current.db
+        s3db = current.s3db
+
+        table = s3db.req_req_item
+        titable = s3db.inv_track_item
+
+        left = titable.on((titable.req_item_id == table.id) & \
+                          (titable.deleted == False))
+
+        query = (table.id == record_id)
+        record = db(query).select(table.id,
+                                  table.req_id,
+                                  table.item_id,
+                                  table.item_pack_id,
+                                  table.quantity,
+                                  titable.id,
+                                  left = left,
+                                  limitby = (0, 1),
+                                  ).first()
+        if record and not record.inv_track_item.id:
+            this = record.req_req_item
+            query = (table.req_id == this.req_id) & \
+                    (table.id != this.id) & \
+                    (table.item_id == this.item_id) & \
+                    (table.item_pack_id == this.item_pack_id) & \
+                    (titable.id == None)
+            other = db(query).select(table.id,
+                                     table.quantity,
+                                     left = left,
+                                     limitby = (0, 1),
+                                     ).first()
+            if other:
+                resource = s3db.resource("req_req_item", id=this.id)
+                deleted = resource.delete()
+                if deleted:
+                    other.update_record(quantity = other.quantity + this.quantity)
+
+    # -------------------------------------------------------------------------
+    def customise_req_req_item_resource(r, tablename):
+
+        s3db = current.s3db
+
+        table = s3db.req_req_item
+
+        quantities = ("quantity_transit",
+                      "quantity_fulfil",
+                      )
+        for fn in quantities:
+            field = table[fn]
+            field.represent = lambda v: v if v is not None else "-"
+
+        resource = r.resource
+        if resource.tablename == "supply_item":
+            from .requests import ShipmentCodeRepresent
+            rtable = s3db.req_req
+            field = rtable.req_ref
+            field.represent = ShipmentCodeRepresent("req_req", "req_ref")
+
+            list_fields = ["item_id",
+                           "req_id$req_ref",
+                           "req_id$site_id",
+                           "item_pack_id",
+                           "quantity",
+                           "quantity_transit",
+                           "quantity_fulfil",
+                           ]
+            s3db.configure("req_req_item",
+                           list_fields = list_fields,
+                           insertable = False,
+                           editable = False,
+                           deletable = False,
+                           )
+
+        # Use drop-down for supply item, not autocomplete
+        field = table.item_id
+        field.widget = None
+
+        s3db.add_custom_callback("req_req_item",
+                                 "onaccept",
+                                 req_req_item_create_onaccept,
+                                 method = "create",
+                                 )
+
+    settings.customise_req_req_item_resource = customise_req_req_item_resource
+
+    # -------------------------------------------------------------------------
+    def customise_supply_item_resource(r, tablename):
+
+        s3db = current.s3db
+
+        table = s3db.supply_item
+
+        unused = ("item_category_id",
+                  "brand_id",
+                  "kit",
+                  "model",
+                  "year",
+                  "weight",
+                  "length",
+                  "width",
+                  "height",
+                  "volume",
+                  )
+        for fn in unused:
+            field = table[fn]
+            field.readable = field.writable = False
+
+        # Code is required
+        field = table.code
+        field.requires = [IS_NOT_EMPTY(), field.requires]
+
+        # Use a localized default for um
+        field = table.um
+        field.default = s3_str(T("piece"))
+
+        # Expose obsolete-flag
+        field = table.obsolete
+        field.label = T("Not orderable")
+        field.readable = field.writable = True
+        from s3 import ICON
+        field.represent = lambda v, row=None: ICON("remove") if v else ""
+
+        # Filter widgets
+        from s3 import S3TextFilter
+        filter_widgets = [S3TextFilter(["name",
+                                        "code",
+                                        "comments",
+                                        ],
+                                       label = T("Search"),
+                                       ),
+                          ]
+        s3db.configure("supply_item",
+                       filter_widgets = filter_widgets,
+                       )
+
+    settings.customise_supply_item_resource = customise_supply_item_resource
+
+    # -------------------------------------------------------------------------
+    def customise_supply_item_controller(**attr):
+
+        s3db = current.s3db
+
+        s3db.add_components("supply_item",
+                            inv_track_item = "item_id",
+                            )
+
+        from .rheaders import rlpptm_supply_rheader
+        attr["rheader"] = rlpptm_supply_rheader
+
+        return attr
+
+    settings.customise_supply_item_controller = customise_supply_item_controller
+
+    # -------------------------------------------------------------------------
+    def shipping_code(prefix, site_id, field):
+
+        if prefix == "WB":
+            # We do not generate waybill numbers, but ask them from the user
+            # TODO have a default anyway?
+            return None
+
+        db = current.db
+        if site_id:
+            code = "%s-%s-" % (prefix, site_id)
+        else:
+            code = "%s-#-" % prefix
+
+        number = 0
+        if field:
+            query = (field.like("%s%%" % code))
+            ref_row = db(query).select(field,
+                                       limitby = (0, 1),
+                                       orderby = ~field
+                                       ).first()
+            if ref_row:
+                ref = ref_row[field]
+                try:
+                    number = int(ref[-6:])
+                except (ValueError, TypeError):
+                    pass
+
+        return "%s%06d" % (code, number + 1)
+
+    settings.supply.shipping_code = shipping_code
 
     # -------------------------------------------------------------------------
     # Comment/uncomment modules here to disable/enable them
@@ -1247,6 +3122,21 @@ def config(settings):
             #description = "Helps to track cases and trace contacts in disease outbreaks",
             restricted = True,
             module_type = None,
+        )),
+        ("req", Storage(
+            name_nice = T("Requests"),
+            #description = "Manage requests for supplies, assets, staff or other resources. Matches against Inventories where supplies are requested.",
+            module_type = 10,
+        )),
+        ("inv", Storage(
+            name_nice = T("Warehouses"),
+            #description = "Receiving and Sending Items",
+            module_type = 4
+        )),
+        ("supply", Storage(
+            name_nice = T("Supply Chain Management"),
+            #description = "Used within Inventory Management, Request Management and Asset Management",
+            module_type = None, # Not displayed
         )),
     ])
 

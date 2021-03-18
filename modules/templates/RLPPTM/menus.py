@@ -9,6 +9,8 @@ except ImportError:
     pass
 import s3menus as default
 
+from .helpers import get_stats_projects
+
 # =============================================================================
 class S3MainMenu(default.S3MainMenu):
     """ Custom Application Main Menu """
@@ -37,26 +39,44 @@ class S3MainMenu(default.S3MainMenu):
         """ Modules Menu """
 
         auth = current.auth
-        has_role = auth.s3_has_role
 
-        is_org_group_admin = lambda i: not has_role("ADMIN") and \
-                                       has_role("ORG_GROUP_ADMIN")
-        menu = [MM("Organizations",
-                   c = "org", f = "organisation",
-                   vars = {"mine": 1} if not has_role("ORG_GROUP_ADMIN") else None,
-                   restrict = ("ORG_GROUP_ADMIN", "ORG_ADMIN"),
+        has_role = auth.s3_has_role
+        has_roles = auth.s3_has_roles
+
+        is_org_group_admin = lambda i: has_role("ORG_GROUP_ADMIN", include_admin=False)
+        report_results = lambda i: has_role("VOUCHER_PROVIDER", include_admin=False) and \
+                                   len(get_stats_projects()) > 0
+
+        menu = [MM("Equipment", c=("req", "inv", "supply"), link=False)(
+                    MM("Orders##delivery", f="req", vars={"type": 1}),
+                    MM("Shipment##process", c="inv", f="send", restrict="SUPPLY_COORDINATOR"),
+                    MM("Deliveries", c="inv", f="recv", restrict="SUPPLY_REQUESTER"),
+                    MM("Items", c="supply", f="item", restrict="SUPPLY_COORDINATOR"),
+                    ),
+                MM("Test Results",
+                   c="disease", f="case_diagnostics", restrict="DISEASE_TEST_READER",
                    ),
                 MM("Test Results",
-                   c = "disease", f="case_diagnostics",
-                   restrict = ("VOUCHER_PROVIDER", "DISEASE_TEST_READER"),
+                   c="disease", f="case_diagnostics", check=report_results, link=False)(
+                    MM("Report Test Result", m="create", vars={"format": "popup"}, modal=True),
+                    MM("List Test Results"),
+                    ),
+                MM("Organizations",
+                   c="org", f="organisation", restrict=("ORG_GROUP_ADMIN", "ORG_ADMIN"),
+                   vars = {"mine": 1} if not has_role("ORG_GROUP_ADMIN") else None,
                    ),
                 MM("Projects",
                    c = "project", f="project",
                    restrict = "ADMIN",
                    ),
-                MM("Find Test Station",
-                   c = "org", f = "facility", m = "summary",
-                   ),
+                MM("Find Test Station", link=False)(
+                    MM("Test Stations for Everybody",
+                       c = "org", f = "facility", m = "summary", vars={"$$code": "TESTS-PUBLIC"},
+                       ),
+                    MM("Test Stations for School and Child Care Staff",
+                       c = "org", f = "facility", m = "summary", vars={"$$code": "TESTS-SCHOOLS"},
+                       ),
+                    ),
                 MM("Pending Approvals", c="default", f="index", args=["approve"],
                    check = is_org_group_admin,
                    ),
@@ -69,9 +89,9 @@ class S3MainMenu(default.S3MainMenu):
         # Link to voucher management
         if auth.s3_logged_in():
             f = None
-            if has_role("PROGRAM_MANAGER"):
+            if has_roles(("PROGRAM_MANAGER", "PROGRAM_ACCOUNTANT")):
                 label, f = "Voucher Programs", "voucher_program"
-            elif has_role("VOUCHER_PROVIDER"):
+            elif has_roles(("VOUCHER_PROVIDER", "PROVIDER_ACCOUNTANT")):
                 label, f = "Voucher Acceptance", "voucher_debit"
             elif has_role("VOUCHER_ISSUER"):
                 label, f = "Voucher Issuance", "voucher"
@@ -148,8 +168,7 @@ class S3MainMenu(default.S3MainMenu):
                               )
         else:
             s3_has_role = auth.s3_has_role
-            is_org_admin = lambda i: not s3_has_role(ADMIN) and \
-                                     s3_has_role("ORG_ADMIN")
+            is_org_admin = lambda i: s3_has_role("ORG_ADMIN", include_admin=False)
             menu_personal = MP()(
                         MP("Administration", c="admin", f="index",
                            restrict = ADMIN,
@@ -220,9 +239,13 @@ class S3OptionsMenu(default.S3OptionsMenu):
     @staticmethod
     def disease():
 
+        s3db = current.s3db
+        report_results = lambda i: s3db.get_config("disease_case_diagnostics",
+                                                   "insertable", True)
+
         return M(c="disease")(
                     M("Test Results", f="case_diagnostics")(
-                        M("Registrieren", m="create"),
+                        M("Registrieren", m="create", check=report_results),
                         M("Statistics", m="report"),
                         ),
                     M("Administration", restrict="ADMIN")(
@@ -235,17 +258,38 @@ class S3OptionsMenu(default.S3OptionsMenu):
     def fin():
         """ FIN / Finance """
 
+        s3db = current.s3db
+        voucher_create = lambda i: s3db.get_config("fin_voucher", "insertable", True)
+        voucher_accept = lambda i: s3db.get_config("fin_voucher_debit", "insertable", True)
+
         return M(c="fin")(
                     M("Voucher Programs", f="voucher_program")(
                         M("Create", m="create", restrict=("PROGRAM_MANAGER")),
                         ),
                     M("Vouchers", f="voucher")(
-                        M("Create Voucher", m="create", restrict=("VOUCHER_ISSUER")),
+                        M("Create Voucher", m="create", restrict=("VOUCHER_ISSUER"),
+                          check = voucher_create,
+                          ),
+                        M("Create Group Voucher", m="create", restrict=("VOUCHER_ISSUER"),
+                          vars = {"g": "1"},
+                          check = voucher_create,
+                          ),
+                        M("Statistics", m="report", restrict=("PROGRAM_MANAGER")),
                         ),
                     M("Accepted Vouchers", f="voucher_debit")(
-                        M("Accept Voucher", m="create", restrict=("VOUCHER_PROVIDER")),
+                        M("Accept Voucher", m="create", restrict=("VOUCHER_PROVIDER"),
+                          check = voucher_accept,
+                          ),
+                        M("Accept Group Voucher", m="create", restrict=("VOUCHER_PROVIDER"),
+                          vars = {"g": "1"},
+                          check = voucher_accept,
+                          ),
                         M("Statistics", m="report"),
                         ),
+                    M("Billing", link=False)(
+                       M("Compensation Claims", f="voucher_claim"),
+                       M("Invoices", f="voucher_invoice"),
+                       ),
                     )
 
     # -------------------------------------------------------------------------
@@ -260,12 +304,18 @@ class S3OptionsMenu(default.S3OptionsMenu):
     def org():
         """ ORG / Organization Registry """
 
-        org_menu = M("Organizations", f="organisation", link=False)
+        org_menu = M("Organizations", f="organisation")
 
-        if current.auth.s3_has_role("ORG_GROUP_ADMIN"):
-            realms = current.auth.permission.permitted_realms("org_group", "update")
+        auth = current.auth
+
+        ORG_GROUP_ADMIN = auth.get_system_roles().ORG_GROUP_ADMIN
+        has_role = auth.s3_has_role
+
+        if has_role(ORG_GROUP_ADMIN):
             gtable = current.s3db.org_group
             query = (gtable.deleted == False)
+            realms = auth.user.realms[ORG_GROUP_ADMIN] \
+                     if not has_role("ADMIN") else None
             if realms is not None:
                 query = (gtable.pe_id.belongs(realms)) & query
             groups = current.db(query).select(gtable.id,
@@ -301,5 +351,36 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         M("Create", m="create")
                         )
                     )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def req():
+        """ REQ / Request Management """
+
+        return M()(
+                M("Orders##delivery", c="req", f="req", vars={"type": 1})(
+                    M("Create", m="create", vars={"type": 1}),
+                    ),
+                M("Shipment##process", c="inv", f="send", restrict="SUPPLY_COORDINATOR"),
+                M("Deliveries", "inv", "recv", restrict="SUPPLY_REQUESTER"),
+                M("Items", c="supply", f="item")(
+                    M("Create", m="create"),
+                    ),
+                M("Warehouses", c="inv", f="warehouse", restrict="ADMIN"),
+                )
+
+    # -------------------------------------------------------------------------
+    @classmethod
+    def supply(cls):
+        """ SUPPLY / Supply Chain Management """
+
+        return cls.req()
+
+    # -------------------------------------------------------------------------
+    @classmethod
+    def inv(cls):
+        """ INV / Inventory Management """
+
+        return cls.req()
 
 # END =========================================================================

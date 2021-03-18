@@ -2,7 +2,7 @@
 
 """ Sahana Eden Human Resources Management
 
-    @copyright: 2011-2020 (c) Sahana Software Foundation
+    @copyright: 2011-2021 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -493,7 +493,7 @@ class HRModel(S3Model):
                                                 zero=None),
                            ),
                      # Base location + Site
-                     self.gis_location_id(label =T("Base Location"),
+                     self.gis_location_id(label = T("Base Location"),
                                           readable = False,
                                           writable = False,
                                           ),

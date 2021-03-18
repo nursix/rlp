@@ -2,7 +2,7 @@
 
 """ Sahana Eden Organisation Model
 
-    @copyright: 2009-2020 (c) Sahana Software Foundation
+    @copyright: 2009-2021 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -2990,7 +2990,9 @@ class S3OrganisationTagModel(S3Model):
         #
         tablename = "org_organisation_tag"
         self.define_table(tablename,
-                          self.org_organisation_id(empty = False),
+                          self.org_organisation_id(empty = False,
+                                                   ondelete = "CASCADE",
+                                                   ),
                           # key is a reserved word in MySQL
                           Field("tag",
                                 label = T("Key"),
@@ -5900,7 +5902,7 @@ class org_SiteCheckInMethod(S3Method):
         output = {}
         error = None
         alert = None
-        alert_type = 'success'
+        alert_type = "success"
 
         # Identify the person
         label = data.get("l")
@@ -6028,7 +6030,7 @@ class org_SiteCheckInMethod(S3Method):
 
         query = (FS("pe_label") == label)
         presource = s3db.resource("pr_person",
-                                  components=[],
+                                  components = [],
                                   filter = query,
                                   )
         rows = presource.select(fields,
@@ -6130,7 +6132,9 @@ class org_SiteCheckInMethod(S3Method):
         query = (table.pe_id == pe_id) & \
                 (table.profile == True) & \
                 (table.deleted != True)
-        row = current.db(query).select(table.image, limitby=(0, 1)).first()
+        row = current.db(query).select(table.image,
+                                       limitby = (0, 1)
+                                       ).first()
 
         if row:
             return URL(c="default", f="download", args=row.image)

@@ -4,7 +4,7 @@
 
     @requires: U{B{I{gluon}} <http://web2py.com>}
 
-    @copyright: 2009-2020 (c) Sahana Software Foundation
+    @copyright: 2009-2021 (c) Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -511,6 +511,13 @@ class S3Config(Storage):
             Whether a Module is enabled in the current template
         """
         return module_name in self.modules
+
+    # -------------------------------------------------------------------------
+    def get_facebook_pixel_id(self):
+        """
+            Facebook Pixel ID
+        """
+        return self.base.get("facebook_pixel_id")
 
     # -------------------------------------------------------------------------
     def get_google_analytics_tracking_id(self):
@@ -1151,6 +1158,15 @@ class S3Config(Storage):
         """
         return self.base.get("solr_url", False)
 
+    def get_xml_formats(self):
+        """
+            Locations of custom export/import transformation stylesheets
+            - settings.base.xml_formats = {"<ext>": "<TMP>"}
+              => modules/templates/<TMP>/formats/<ext>/<method>.xsl
+        """
+        return self.base.get("xml_formats")
+
+
     def get_import_callback(self, tablename, callback):
         """
             Lookup callback to use for imports in the following order:
@@ -1313,6 +1329,28 @@ class S3Config(Storage):
         """
         return self.fin.get("voucher_personalize")
 
+    def get_fin_voucher_eligibility_types(self):
+        """
+            Enable UI to manage eligibility types in voucher programs
+        """
+        return self.fin.get("voucher_eligibility_types")
+
+    def get_fin_voucher_invoice_status_labels(self):
+        """
+            Customise labels for invoice statuses
+            - dict {status: label}
+            - NEW, PAID, REJECTED are mandatory, can only change labels
+            - VERIFIED and APPROVED are optional, can be set to None to
+              disable completely
+        """
+        return self.fin.get("voucher_invoice_status_labels")
+
+    def get_fin_voucher_claim_paid_label(self):
+        """
+            Custom label for claim PAID-Status
+        """
+        return self.fin.get("voucher_claim_paid_label", "Paid")
+
     # -------------------------------------------------------------------------
     # GIS (Map) Settings
     #
@@ -1320,11 +1358,23 @@ class S3Config(Storage):
         """ API key for Bing """
         return self.gis.get("api_bing")
 
+    def get_gis_api_getaddress(self):
+        """
+            API key for GetAddress.io
+        """
+        return self.gis.get("api_getaddress")
+
     def get_gis_api_google(self):
         """
             API key for Google Maps
         """
         return self.gis.get("api_google", "")
+
+    def get_gis_api_openweathermap(self):
+        """
+            API key for Open Weather Map
+        """
+        return self.gis.get("api_openweathermap", "")
 
     def get_gis_bbox_min_size(self):
         """
@@ -1657,6 +1707,14 @@ class S3Config(Storage):
             Display Postcode form field when selecting Locations
         """
         return self.__lazy("gis", "postcode_selector", default=True)
+
+    def get_gis_postcode_to_address(self):
+        """
+            Service to use for Postcode to Address lookups in LocationSelector
+            Supported Options:
+            * getaddress (GetAddress.io)
+        """
+        return self.__lazy("gis", "postcode_to_address", default=None)
 
     def get_gis_print(self):
         """
@@ -3316,12 +3374,6 @@ class S3Config(Storage):
     # -------------------------------------------------------------------------
     # CMS: Content Management System
     #
-    def get_cms_expose_pages(self):
-        """
-            Global control over default/page controller
-        """
-        return self.cms.get("expose_pages", False)
-
     def get_cms_bookmarks(self):
         """
             Whether to allow users to bookmark Posts in News feed
@@ -5901,6 +5953,13 @@ class S3Config(Storage):
             Whether to allow Alternative Items to be defined
         """
         return self.supply.get("use_alt_name", True)
+
+    def get_supply_shipping_code(self):
+        """
+            Custom shipping code generator (REQ, WB, GRN etc)
+            - function(prefix, site_id, field)
+        """
+        return self.supply.get("shipping_code")
 
     # -------------------------------------------------------------------------
     # Vulnerability

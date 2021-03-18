@@ -5,7 +5,7 @@
     @requires: U{B{I{gluon}} <http://web2py.com>}
     @requires: U{B{I{shapely}} <http://trac.gispython.org/lab/wiki/Shapely>}
 
-    @copyright: (c) 2010-2020 Sahana Software Foundation
+    @copyright: (c) 2010-2021 Sahana Software Foundation
     @license: MIT
 
     Permission is hereby granted, free of charge, to any person
@@ -715,7 +715,7 @@ class GIS(object):
             - used by S3LocationSelector
         """
 
-        if not lat or not lon:
+        if lat is None or lon is None:
             return "Need Lat & Lon"
 
         results = ""
@@ -7936,22 +7936,31 @@ def addFeatureResources(feature_resources):
                 style = _style.style
             #url_format = _style.url_format
 
+            # Parameters for Layer URL (in addition to any filters)
+            params = layer.get("custom_params") or {}
+            params.update({"layer": row.layer_id,
+                           "show_ids": "true",
+                           })
             aggregate = layer.get("aggregate", row.aggregate)
             if aggregate:
-                url = "%s.geojson?layer=%i&show_ids=true" % \
-                    (URL(c=row.controller, f=row.function, args="report"),
-                     row.layer_id)
+                url = URL(c = row.controller,
+                          f = row.function,
+                          args = ["report.geojson"],
+                          vars = params,
+                          )
                 #if not url_format:
                 # Use gis/location controller in all reports
                 url_format = "%s/{id}.plain" % URL(c="gis", f="location")
             else:
-                _url = URL(c=row.controller, f=row.function)
-                url = "%s.geojson?layer=%i&components=None&show_ids=true&maxdepth=%s" % \
-                    (_url,
-                     row.layer_id,
-                     maxdepth)
-                #if not url_format:
-                url_format = "%s/{id}.plain" % _url
+                params.update({"components": "None",
+                               "maxdepth": maxdepth,
+                               })
+                url = URL(c = row.controller,
+                          f = "%s.geojson" % row.function,
+                          vars = params,
+                          )
+                #if not url_format
+                url_format = "%s/{id}.plain" % URL(c = row.controller, f = row.function)
 
             # Use specified filter or fallback to the one in the layer
             _filter = layer.get("filter", row.filter)
@@ -9029,31 +9038,24 @@ class LayerOpenWeatherMap(Layer):
     """
 
     tablename = "gis_layer_openweathermap"
-    dictname = "OWM"
+    dictname = "layers_openweathermap"
     style = False
 
     # -------------------------------------------------------------------------
     def as_dict(self, options=None):
         sublayers = self.sublayers
         if sublayers:
-            if current.response.s3.debug:
-                self.scripts.append("gis/OWM.OpenLayers.js")
-            else:
-                self.scripts.append("gis/OWM.OpenLayers.min.js")
+            apikey = current.deployment_settings.get_gis_api_openweathermap()
+            if not apikey:
+                raise Exception("Cannot display OpenWeatherMap layers unless we have an API key\n")
+            current.response.s3.js_global.append("S3.gis.openweathermap='%s'" % apikey)
             ldict = {}
             for sublayer in sublayers:
-                if sublayer.type == "station":
-                    ldict["station"] = {"name": sublayer.name or "Weather Stations",
+                ldict[sublayer.type] = {"name": sublayer.name,
                                         "id": sublayer.layer_id,
                                         "dir": sublayer.dir,
                                         "visibility": sublayer.visible
                                         }
-                elif sublayer.type == "city":
-                    ldict["city"] = {"name": sublayer.name or "Current Weather",
-                                     "id": sublayer.layer_id,
-                                     "dir": sublayer.dir,
-                                     "visibility": sublayer.visible
-                                     }
             if options:
                 # Used by Map._setup()
                 options[self.dictname] = ldict
@@ -9625,13 +9627,16 @@ class S3Map(S3Method):
             @return: output object to send to the view
         """
 
+        output = None
+
         if r.http == "GET":
             representation = r.representation
             if representation == "html":
-                return self.page(r, **attr)
-
+                output = self.page(r, **attr)
         else:
             r.error(405, current.ERROR.BAD_METHOD)
+
+        return output
 
     # -------------------------------------------------------------------------
     def page(self, r, **attr):
@@ -9642,6 +9647,8 @@ class S3Map(S3Method):
             @param attr: controller attributes for the request
         """
 
+        output = {}
+
         if r.representation in ("html", "iframe"):
 
             response = current.response
@@ -9650,8 +9657,6 @@ class S3Map(S3Method):
             tablename = resource.tablename
 
             widget_id = "default_map"
-
-            output = {}
 
             title = self.crud_string(tablename, "title_map")
             output["title"] = title
@@ -9698,18 +9703,18 @@ class S3Map(S3Method):
             # View
             response.view = self._view(r, "map.html")
 
-            return output
-
         else:
             r.error(415, current.ERROR.BAD_FORMAT)
+
+        return output
 
     # -------------------------------------------------------------------------
     def widget(self,
                r,
-               method="map",
-               widget_id=None,
-               visible=True,
-               callback=None,
+               method = "map",
+               widget_id = None,
+               visible = True,
+               callback = None,
                **attr):
         """
             Render a Map widget suitable for use in an S3Filter-based page
@@ -9754,19 +9759,25 @@ class S3Map(S3Method):
             prefix, name = tablename.split("_", 1)
             layer_id = lookup_layer(prefix, name)
 
+        # This URL is ignored if we have a layer_id:
         url = URL(extension="geojson", args=None, vars=r.get_vars)
+
+        # Retain any custom filter parameters for the layer lookup
+        custom_params = {k: v for k, v in r.get_vars.items() if k[:2] == "$$"}
 
         # @ToDo: Support maps with multiple layers (Dashboards)
         #_id = "search_results_%s" % widget_id
         _id = "search_results"
-        feature_resources = [{"name"      : current.T("Search Results"),
-                              "id"        : _id,
-                              "layer_id"  : layer_id,
-                              "tablename" : tablename,
-                              "url"       : url,
+        feature_resources = [{"name"          : current.T("Search Results"),
+                              "id"            : _id,
+                              "layer_id"      : layer_id,
+                              "tablename"     : tablename,
+                              "url"           : url,
+                              "custom_params" : custom_params,
                               # We activate in callback after ensuring URL is updated for current filter status
-                              "active"    : False,
+                              "active"        : False,
                               }]
+
         settings = current.deployment_settings
         catalogue_layers = settings.get_gis_widget_catalogue_layers()
         legend = settings.get_gis_legend()
@@ -9782,18 +9793,18 @@ class S3Map(S3Method):
             else:
                 wms_browser = None
 
-        map = gis.show_map(id = widget_id,
-                           feature_resources = feature_resources,
-                           catalogue_layers = catalogue_layers,
-                           collapsed = True,
-                           legend = legend,
-                           toolbar = toolbar,
-                           save = False,
-                           search = search,
-                           wms_browser = wms_browser,
-                           callback = callback,
-                           )
-        return map
+        map_widget = gis.show_map(id = widget_id,
+                                  feature_resources = feature_resources,
+                                  catalogue_layers = catalogue_layers,
+                                  collapsed = True,
+                                  legend = legend,
+                                  toolbar = toolbar,
+                                  save = False,
+                                  search = search,
+                                  wms_browser = wms_browser,
+                                  callback = callback,
+                                  )
+        return map_widget
 
 # =============================================================================
 class S3ExportPOI(S3Method):
