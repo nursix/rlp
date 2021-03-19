@@ -8,7 +8,7 @@
 # python web2py.py -S eden -M -R applications/eden/modules/templates/RLP/upgrade/1.6.5-1.7.0.py
 #
 import sys
-#from s3 import S3Duplicate
+from s3 import S3Duplicate
 
 #from gluon.storage import Storage
 #from gluon.tools import callback
