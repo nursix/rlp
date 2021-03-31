@@ -78,24 +78,28 @@ def rlpptm_fin_rheader(r, tabs=None):
             rheader_title = "signature"
             rheader_fields = [[(T("Status"), "status"),],
                               ]
+
         elif tablename == "fin_voucher_invoice":
 
             if not tabs:
                 tabs = [(T("Basic Details"), None),
                         ]
 
-            # Lookup the invoice header data
-            from .helpers import InvoicePDF
-            data = InvoicePDF.lookup_header_data(record)
+            from .helpers import InvoicePDF, check_invoice_integrity
 
+            # Lookup the invoice header data
+            data = InvoicePDF.lookup_header_data(record)
             addr_street = lambda row: data.get("addr_street", "-")
             addr_place = lambda row: "%s %s" % (data.get("addr_postcode", ""),
                                                 data.get("addr_place", "?"),
                                                 )
-            email = lambda row: data.get("email", "-")
+            email = lambda row: data.get("email") or "-"
 
             rheader_title = "pe_id"
-            rheader_fields = [[(T("Address"), addr_street), "invoice_no"],
+            rheader_fields = [[(T("Address"), addr_street),
+                               "invoice_no",
+                               (T("Integrity Check"), check_invoice_integrity),
+                               ],
                               [(T("Place"), addr_place), "date"],
                               [(T("Email"), email), "status"],
                               ]
@@ -133,13 +137,14 @@ def rlpptm_org_rheader(r, tabs=None):
             auth = current.auth
             is_org_group_admin = auth.s3_has_role("ORG_GROUP_ADMIN")
 
+            db = current.db
+            s3db = current.s3db
+
             if not tabs:
 
                 invite_tab = None
                 sites_tab = None
 
-                db = current.db
-                s3db = current.s3db
                 gtable = s3db.org_group
                 mtable = s3db.org_group_membership
                 query = (mtable.organisation_id == record.id) & \
@@ -162,17 +167,24 @@ def rlpptm_org_rheader(r, tabs=None):
                         (T("Staff"), "human_resource"),
                         ]
 
+            # Look up the OrgID
+            def org_id(row):
+                ttable = s3db.org_organisation_tag
+                query = (ttable.organisation_id == row.id) & \
+                        (ttable.tag == "OrgID") & \
+                        (ttable.deleted == False)
+                tag = db(query).select(ttable.value, limitby=(0, 1)).first()
+                return tag.value if tag else "-"
+
             # Check for active user accounts:
+            rheader_fields = [[(T("Organization ID"), org_id)]]
             if is_org_group_admin:
 
                 from .helpers import get_org_accounts
                 active = get_org_accounts(record.id)[0]
 
                 active_accounts = lambda row: len(active)
-                rheader_fields = [[(T("Active Accounts"), active_accounts)],
-                                  ]
-            else:
-                rheader_fields = []
+                rheader_fields.append([(T("Active Accounts"), active_accounts)])
 
             rheader_title = "name"
 
@@ -214,6 +226,8 @@ def rlpptm_project_rheader(r, tabs=None):
             rheader_fields = [[(T("Code"), "code")],
                               ["organisation_id"],
                               ]
+        else:
+            return None
 
         rheader = S3ResourceHeader(rheader_fields, tabs, title=rheader_title)
         rheader = rheader(r, table = resource.table, record = record)
@@ -332,7 +346,7 @@ def rlpptm_inv_rheader(r, tabs=None):
                         (T("Items"), "track_item"),
                         ]
 
-            rheader_fields = [["req_ref", "send_ref"],
+            rheader_fields = [["req_ref"], # , "send_ref"],
                               ["status"],
                               ["date"]
                               ]
@@ -391,9 +405,9 @@ def rlpptm_inv_rheader(r, tabs=None):
                     msg = "-"
                 return msg
 
-            rheader_fields = [["send_ref", "site_id"],
-                              ["status", (T("Content"), content)],
-                              ["date"]
+            rheader_fields = [#["send_ref", "site_id"],
+                              ["status", "site_id"],
+                              ["date", (T("Content"), content)],
                               ]
             rheader_title = "req_ref"
 
