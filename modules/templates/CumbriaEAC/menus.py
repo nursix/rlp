@@ -50,15 +50,19 @@ class S3MainMenu(default.S3MainMenu):
                        ),
                     MM("My Clients", c="cr", f="shelter", args=[shelter_id, "client"])(
                        MM("Check-In", c="cr", f="shelter", args=[shelter_id, "client", "create"]),
-                       MM("All Clients", c="pr", f="person", m="summary"),
-                       MM("Import", m="import"),
+                       MM("All Clients", c="pr", f="person"),
+                       MM("Import", c="cr", f="shelter_registration", m="import"),
+                       MM("Report", c="pr", f="person", m="report"),
                        ),
                     ]
         else:
-            menu = [MM("Shelters", c="cr", f="shelter", m="summary"),
+            menu = [MM("Shelters", c="cr", f="shelter", m="summary")(
+                       MM("New Shelter", c="cr", f="shelter", m="create"),
+                       ),
                     MM("Staff", c="hrm", f="human_resource")(),
-                    MM("Clients", c="pr", f="person", m="summary")(
-                       MM("Import", m="import"),
+                    MM("Clients", c="pr", f="person")(
+                       MM("Import", c="cr", f="shelter_registration", m="import"),
+                       MM("Report", m="report"),
                        ),
                     ]
 
@@ -195,6 +199,7 @@ class S3OptionsMenu(default.S3OptionsMenu):
                         #M("Roles", f="group"),
                         #M("Membership", f="membership"),
                     ),
+                    M("Audit Log", c="admin", f="audit"),
                     #M("Consent Tracking", c="admin", link=False, check=consent_tracking)(
                     M("Consent Tracking", c="admin", link=False)(
                         M("Processing Types", f="processing_type"),
@@ -205,6 +210,10 @@ class S3OptionsMenu(default.S3OptionsMenu):
                     M("Organizations", c="org", f="organisation")(
                         #M("Types", f="organisation_type"),
                         #M("Job Titles", c="hrm", f="job_title"),
+                        ),
+                    M("Shelters", c="cr", f="shelter")(
+                        M("Types", f="shelter_type"),
+                        M("Services", f="shelter_service"),
                         ),
                     #M("Time Slots", c="pr", f="slot")(),
                     #M("Volunteer Offers", c="hrm", f="skill")(),

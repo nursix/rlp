@@ -70,6 +70,7 @@ from s3dal import Rows
 from .s3datetime import s3_format_datetime, s3_parse_datetime
 from .s3fields import s3_all_meta_field_names
 from .s3rest import S3Method
+from .s3rtb import S3ResourceTree
 from .s3track import S3Trackable
 from .s3utils import s3_include_ext, s3_include_underscore, s3_str
 
@@ -238,7 +239,7 @@ class GIS(object):
         #messages.centroid_error = str(A("Shapely", _href="http://pypi.python.org/pypi/Shapely/", _target="_blank")) + " library not found, so can't find centroid!"
         messages.centroid_error = "Shapely library not functional, so can't find centroid! Install Geos & Shapely for Line/Polygon support"
         messages.unknown_type = "Unknown Type!"
-        messages.invalid_wkt_point = "Invalid WKT: must be like POINT(3 4)"
+        messages.invalid_wkt_point = "Invalid WKT: must be like POINT (3 4)"
         messages.invalid_wkt = "Invalid WKT: see http://en.wikipedia.org/wiki/Well-known_text"
         messages.lon_empty = "Invalid: Longitude can't be empty if Latitude specified!"
         messages.lat_empty = "Invalid: Latitude can't be empty if Longitude specified!"
@@ -739,7 +740,7 @@ class GIS(object):
                 query = (table.level != None) & \
                         (table.deleted != True)
                 if current.deployment_settings.get_gis_spatialdb():
-                    point = "POINT(%s %s)" % (lon, lat)
+                    point = "POINT (%s %s)" % (lon, lat)
                     query &= (table.the_geom.st_intersects(point))
                     rows = current.db(query).select(table.id,
                                                     table.level,
@@ -2412,7 +2413,7 @@ class GIS(object):
             e.g. Feature Layers or Search results (Feature Resources)
             e.g. Exports in KML, GeoRSS or GPX format
 
-            Called by S3REST: S3Resource.export_tree()
+            Called by S3ResourceTree
             @param: resource - S3Resource instance (required)
             @param: attr_fields - list of attr_fields to use instead of reading
                                   from get_vars or looking up in gis_layer_feature
@@ -3051,7 +3052,7 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
         """
             Lookup Shapefile Layer polygons once per layer and not per-record
 
-            Called by S3REST: S3Resource.export_tree()
+            Called by S3ResourceTree
 
             @ToDo: Vary simplification level & precision by Zoom level
                    - store this in the style?
@@ -3121,7 +3122,7 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
         """
             Lookup Theme Layer polygons once per layer and not per-record
 
-            Called by S3REST: S3Resource.export_tree()
+            Called by S3ResourceTree
 
             @ToDo: Vary precision by Lx
                    - store this (& tolerance map) in the style?
@@ -4607,9 +4608,9 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
             Convert a LatLon to a WKT string
 
             >>> s3gis.latlon_to_wkt(6, 80)
-            'POINT(80 6)'
+            'POINT (80 6)'
         """
-        WKT = "POINT(%f %f)" % (lon, lat)
+        WKT = "POINT (%f %f)" % (lon, lat)
         return WKT
 
     # -------------------------------------------------------------------------
@@ -4625,7 +4626,7 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
         if not wkt:
             if not lon is not None and lat is not None:
                 raise RuntimeError("Need wkt or lon+lat to parse a location")
-            wkt = "POINT(%f %f)" % (lon, lat)
+            wkt = "POINT (%f %f)" % (lon, lat)
             geom_type = GEOM_TYPES["point"]
             bbox = (lon, lat, lon, lat)
         else:
@@ -5829,7 +5830,7 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
             elif lon is None or lon == "":
                 form.errors["lon"] = current.messages.lon_empty
             else:
-                form_vars.wkt = "POINT(%(lon)s %(lat)s)" % form_vars
+                form_vars.wkt = "POINT (%(lon)s %(lat)s)" % form_vars
                 radius = form_vars.get("radius", None)
                 if radius:
                     bbox = GIS.get_bounds_from_radius(lat, lon, radius)
@@ -5944,7 +5945,7 @@ page.render('%(filename)s', {format: 'jpeg', quality: '100'});''' % \
                     elif lon is None or lon == "":
                         form.errors["lon"] = current.messages.lon_empty
                     else:
-                        form_vars.wkt = "POINT(%(lon)s %(lat)s)" % form_vars
+                        form_vars.wkt = "POINT (%(lon)s %(lat)s)" % form_vars
                         if "lon_min" not in form_vars or form_vars.lon_min is None:
                             form_vars.lon_min = lon
                         if "lon_max" not in form_vars or form_vars.lon_max is None:
@@ -7952,7 +7953,7 @@ def addFeatureResources(feature_resources):
                 # Use gis/location controller in all reports
                 url_format = "%s/{id}.plain" % URL(c="gis", f="location")
             else:
-                params.update({"components": "None",
+                params.update({"mcomponents": "None",
                                "maxdepth": maxdepth,
                                })
                 url = URL(c = row.controller,
@@ -8005,7 +8006,7 @@ def addFeatureResources(feature_resources):
                 # Not much we can do!
                 # @ToDo: Use Context
                 continue
-            options = "components=None&maxdepth=%s&show_ids=true" % maxdepth
+            options = "mcomponents=None&maxdepth=%s&show_ids=true" % maxdepth
             if "?" in url:
                 url = "%s&%s" % (url, options)
             else:
@@ -8483,7 +8484,7 @@ class LayerFeature(Layer):
                     maxdepth = 0
                 _url = URL(self.controller, self.function)
                 # id is used for url_format
-                url = "%s.geojson?layer=%i&components=None&maxdepth=%s&show_ids=true" % \
+                url = "%s.geojson?layer=%i&mcomponents=None&maxdepth=%s&show_ids=true" % \
                     (_url,
                      self.layer_id,
                      maxdepth)
@@ -9047,7 +9048,11 @@ class LayerOpenWeatherMap(Layer):
         if sublayers:
             apikey = current.deployment_settings.get_gis_api_openweathermap()
             if not apikey:
-                raise Exception("Cannot display OpenWeatherMap layers unless we have an API key\n")
+                # Raising exception prevents gis/index view from loading
+                # - logging the error should suffice?
+                #raise Exception("Cannot display OpenWeatherMap layers unless we have an API key\n")
+                current.log.error("Cannot display OpenWeatherMap layers unless we have an API key")
+                return {}
             current.response.s3.js_global.append("S3.gis.openweathermap='%s'" % apikey)
             ldict = {}
             for sublayer in sublayers:
@@ -9975,8 +9980,9 @@ class S3ExportPOI(S3Method):
                 _msince = msince
 
             # Export the tree and append its element to the element list
-            tree = resource.export_tree(msince=_msince,
-                                        references=["location_id"])
+            tree = S3ResourceTree(resource).build(msince = msince,
+                                                  references = ["location_id"],
+                                                  )
 
             # Update the feed data
             if update_feed:

@@ -6,12 +6,14 @@
     @license: MIT
 """
 
-from gluon import current, Field, CRYPT, IS_EMAIL, IS_LOWER, IS_NOT_IN_DB, \
-                  SQLFORM, DIV, H4, H5, I, INPUT, P, SPAN, TABLE, TD, TH, TR
+from gluon import current, Field, URL, \
+                  CRYPT, IS_EMAIL, IS_IN_SET, IS_LOWER, IS_NOT_IN_DB, \
+                  SQLFORM, A, DIV, H4, H5, I, INPUT, LI, P, SPAN, TABLE, TD, TH, TR, UL
 
-from s3 import IS_FLOAT_AMOUNT, S3DateTime, S3Method, \
-               s3_fullname, s3_mark_required
+from s3 import ICON, IS_FLOAT_AMOUNT, S3DateTime, \
+               S3Method, S3Represent, s3_fullname, s3_mark_required, s3_str
 
+from s3db.pr import pr_PersonRepresentContact
 # =============================================================================
 def get_role_realms(role):
     """
@@ -421,6 +423,837 @@ def can_cancel_debit(debit):
         # No user
         return False
 
+# -----------------------------------------------------------------------------
+def configure_binary_tags(resource, tag_components):
+    """
+        Configure representation of binary tags
+
+        @param resource: the S3Resource
+        @param tag_components: tuple|list of filtered tag component aliases
+    """
+
+    T = current.T
+
+    binary_tag_opts = {"Y": T("Yes"), "N": T("No")}
+
+    for cname in tag_components:
+        component = resource.components.get(cname)
+        if component:
+            ctable = component.table
+            field = ctable.value
+            field.default = "N"
+            field.requires = IS_IN_SET(binary_tag_opts, zero=None)
+            field.represent = lambda v, row=None: binary_tag_opts.get(v, "-")
+
+# -----------------------------------------------------------------------------
+def workflow_tag_represent(options):
+    """
+        Color-coded and icon-supported representation of
+        facility approval workflow tags
+
+        @param options: the tag options as dict {value: label}
+    """
+
+    icons = {"REVISE": "fa fa-exclamation-triangle",
+             "REVIEW": "fa fa-hourglass",
+             "APPROVED": "fa fa-check",
+             "N": "fa fa-minus-circle",
+             "Y": "fa fa-check",
+             }
+    css_classes = {"REVISE": "workflow-red",
+                   "REVIEW": "workflow-amber",
+                   "APPROVED": "workflow-green",
+                   "N": "workflow-red",
+                   "Y": "workflow-green",
+                   }
+
+    def represent(value, row=None):
+
+        label = DIV(_class="approve-workflow")
+        color = css_classes.get(value)
+        if color:
+            label.add_class(color)
+        icon = icons.get(value)
+        if icon:
+            label.append(I(_class=icon))
+        label.append(options.get(value, "-"))
+
+        return label
+
+    return represent
+
+# -----------------------------------------------------------------------------
+def configure_workflow_tags(resource, role="applicant", record_id=None):
+    """
+        Configure facility approval workflow tags
+
+        @param resource: the org_facility resource
+        @param role: the user's role in the workflow (applicant|approver)
+        @param record_id: the facility record ID
+
+        @returns: the list of visible workflow tags [(label, selector)]
+    """
+
+    T = current.T
+    components = resource.components
+
+    visible_tags = []
+
+    # Configure STATUS tag
+    status_tag_opts = {"REVISE": T("Completion/Adjustment Required"),
+                       "READY": T("Ready for Review"),
+                       "REVIEW": T("Review Pending"),
+                       "APPROVED": T("Approved##actionable"),
+                       }
+    selectable = None
+    status_visible = False
+    review_tags_visible = False
+
+    if role == "applicant" and record_id:
+        # Check current status
+        db = current.db
+        s3db = current.s3db
+        ftable = s3db.org_facility
+        ttable = s3db.org_site_tag
+        join = ftable.on((ftable.site_id == ttable.site_id) & \
+                         (ftable.id == record_id))
+        query = (ttable.tag == "STATUS") & (ttable.deleted == False)
+        row = db(query).select(ttable.value, join=join, limitby=(0, 1)).first()
+        if row:
+            if row.value == "REVISE":
+                review_tags_visible = True
+                selectable = (row.value, "READY")
+            elif row.value == "REVIEW":
+                review_tags_visible = True
+        status_visible = True
+
+    component = components.get("status")
+    if component:
+        ctable = component.table
+        field = ctable.value
+        field.default = "REVISE"
+        field.readable = status_visible
+        if status_visible:
+            if selectable:
+                selectable_statuses = [(status, status_tag_opts[status])
+                                       for status in selectable]
+                field.requires = IS_IN_SET(selectable_statuses, zero=None)
+                field.writable = True
+            else:
+                field.writable = False
+            visible_tags.append((T("Processing Status"), "status.value"))
+        field.represent = workflow_tag_represent(status_tag_opts)
+
+    # Configure review tags
+    review_tag_opts = (("REVISE", T("Completion/Adjustment Required")),
+                       ("REVIEW", T("Review Pending")),
+                       ("APPROVED", T("Approved##actionable")),
+                       )
+    selectable = review_tag_opts if role == "approver" else None
+
+    review_tags = (("mpav", T("MPAV Qualification")),
+                   ("hygiene", T("Hygiene Plan")),
+                   ("layout", T("Facility Layout Plan")),
+                   )
+    for cname, label in review_tags:
+        component = components.get(cname)
+        if component:
+            ctable = component.table
+            field = ctable.value
+            field.default = "REVISE"
+            if selectable:
+                field.requires = IS_IN_SET(selectable, zero=None, sort=False)
+                field.readable = field.writable = True
+            else:
+                field.readable = review_tags_visible
+                field.writable = False
+            if field.readable:
+                visible_tags.append((label, "%s.value" % cname))
+            field.represent = workflow_tag_represent(dict(review_tag_opts))
+
+    # Configure PUBLIC tag
+    binary_tag_opts = {"Y": T("Yes"),
+                       "N": T("No"),
+                       }
+    selectable = binary_tag_opts if role == "approver" else None
+
+    component = resource.components.get("public")
+    if component:
+        ctable = component.table
+        field = ctable.value
+        field.default = "N"
+        if selectable:
+            field.requires = IS_IN_SET(selectable, zero=None)
+            field.writable = True
+        else:
+            field.requires = IS_IN_SET(binary_tag_opts, zero=None)
+            field.writable = False
+        field.represent = workflow_tag_represent(binary_tag_opts)
+    visible_tags.append((T("In Public Registry"), "public.value"))
+    visible_tags.append("site_details.authorisation_advice")
+
+    return visible_tags
+
+# -----------------------------------------------------------------------------
+def facility_approval_workflow(site_id):
+    """
+        Update facility approval workflow tags
+
+        @param site_id: the site ID
+    """
+
+    db = current.db
+    s3db = current.s3db
+
+    workflow = ("STATUS", "MPAV", "HYGIENE", "LAYOUT", "PUBLIC")
+    review = ("MPAV", "HYGIENE", "LAYOUT")
+
+    # Get all tags for site
+    ttable = s3db.org_site_tag
+    query = (ttable.site_id == site_id) & \
+            (ttable.tag.belongs(workflow)) & \
+            (ttable.deleted == False)
+    rows = db(query).select(ttable.id,
+                            ttable.tag,
+                            ttable.value,
+                            )
+    tags = {row.tag: row.value for row in rows}
+
+    if any(k not in tags for k in workflow):
+        ftable = s3db.org_facility
+        facility = db(ftable.site_id == site_id).select(ftable.id,
+                                                        limitby = (0, 1),
+                                                        ).first()
+        if facility:
+            add_facility_default_tags(facility)
+            facility_approval_workflow(site_id)
+
+    update = {}
+    notify = False
+
+    status = tags.get("STATUS")
+    if status == "REVISE":
+        if all(tags[k] == "APPROVED" for k in review):
+            update["PUBLIC"] = "Y"
+            update["STATUS"] = "APPROVED"
+            notify = True
+        elif any(tags[k] == "REVIEW" for k in review):
+            update["PUBLIC"] = "N"
+            update["STATUS"] = "REVIEW"
+        else:
+            update["PUBLIC"] = "N"
+            # Keep status REVISE
+
+    elif status == "READY":
+        update["PUBLIC"] = "N"
+        if all(tags[k] == "APPROVED" for k in review):
+            for k in review:
+                update[k] = "REVIEW"
+        else:
+            for k in review:
+                if tags[k] == "REVISE":
+                    update[k] = "REVIEW"
+        update["STATUS"] = "REVIEW"
+
+    elif status == "REVIEW":
+        if all(tags[k] == "APPROVED" for k in review):
+            update["PUBLIC"] = "Y"
+            update["STATUS"] = "APPROVED"
+            notify = True
+        elif any(tags[k] == "REVIEW" for k in review):
+            update["PUBLIC"] = "N"
+            # Keep status REVIEW
+        elif any(tags[k] == "REVISE" for k in review):
+            update["PUBLIC"] = "N"
+            update["STATUS"] = "REVISE"
+            notify = True
+
+    elif status == "APPROVED":
+        if any(tags[k] == "REVIEW" for k in review):
+            update["PUBLIC"] = "N"
+            update["STATUS"] = "REVIEW"
+        elif any(tags[k] == "REVISE" for k in review):
+            update["PUBLIC"] = "N"
+            update["STATUS"] = "REVISE"
+            notify = True
+
+    for row in rows:
+        key = row.tag
+        if key in update:
+            row.update_record(value=update[key])
+
+    T = current.T
+
+    public = update.get("PUBLIC")
+    if public and public != tags["PUBLIC"]:
+        if public == "Y":
+            msg = T("Facility added to public registry")
+        else:
+            msg = T("Facility removed from public registry pending review")
+        current.response.information = msg
+
+    # Send Notifications
+    if notify:
+        tags.update(update)
+        msg = facility_review_notification(site_id, tags)
+        if msg:
+            current.response.warning = \
+                T("Test station could not be notified: %(error)s") % {"error": msg}
+        else:
+            current.response.flash = \
+                T("Test station notified")
+
+# -----------------------------------------------------------------------------
+def facility_review_notification(site_id, tags):
+    """
+        Notify the OrgAdmin of a test station about the status of the review
+
+        @param site_id: the test facility site ID
+        @param tags: the current workflow tags
+
+        @returns: error message on error, else None
+    """
+
+    db = current.db
+    s3db = current.s3db
+
+    # Lookup the facility
+    ftable = s3db.org_facility
+    query = (ftable.site_id == site_id) & \
+            (ftable.deleted == False)
+    facility = db(query).select(ftable.id,
+                                ftable.name,
+                                ftable.organisation_id,
+                                limitby = (0, 1),
+                                ).first()
+    if not facility:
+        return "Facility not found"
+
+    organisation_id = facility.organisation_id
+    if not organisation_id:
+        return "Organisation not found"
+
+    # Find the OrgAdmin email addresses
+    email = get_role_emails("ORG_ADMIN",
+                            organisation_id = organisation_id,
+                            )
+    if not email:
+        return "No Organisation Administrator found"
+
+    # Data for the notification email
+    data = {"name": facility.name,
+            "url": URL(c = "org",
+                       f = "organisation",
+                       args = [organisation_id, "facility", facility.id],
+                       host = True,
+                       ),
+            }
+
+    status = tags.get("STATUS")
+
+    if status == "REVISE":
+        template = "FacilityReview"
+
+        # Add advice
+        dtable = s3db.org_site_details
+        query = (dtable.site_id == site_id) & \
+                (dtable.deleted == False)
+        details = db(query).select(dtable.authorisation_advice,
+                                   limitby = (0, 1),
+                                   ).first()
+        if details and details.authorisation_advice:
+            data["advice"] = details.authorisation_advice
+
+        # Add explanations for relevant requirements
+        review = (("MPAV", "FacilityMPAVRequirements"),
+                  ("HYGIENE", "FacilityHygienePlanRequirements"),
+                  ("LAYOUT", "FacilityLayoutRequirements"),
+                  )
+        ctable = s3db.cms_post
+        ltable = s3db.cms_post_module
+        join = ltable.on((ltable.post_id == ctable.id) & \
+                         (ltable.module == "org") & \
+                         (ltable.resource == "facility") & \
+                         (ltable.deleted == False))
+        explanations = []
+        for tag, requirements in review:
+            if tags.get(tag) == "REVISE":
+                query = (ctable.name == requirements) & \
+                        (ctable.deleted == False)
+                row = db(query).select(ctable.body,
+                                       join = join,
+                                       limitby = (0, 1),
+                                       ).first()
+                if row:
+                    explanations.append(row.body)
+        data["explanations"] = "\n\n".join(explanations) if explanations else "-"
+
+    elif status == "APPROVED":
+        template = "FacilityApproved"
+
+    else:
+        # No notifications for this status
+        return "invalid status"
+
+    # Lookup email address of current user
+    from .notifications import CMSNotifications
+    auth = current.auth
+    if auth.user:
+        cc = CMSNotifications.lookup_contact(auth.user.pe_id)
+    else:
+        cc = None
+
+    # Send CMS Notification FacilityReview
+    return CMSNotifications.send(email,
+                                 template,
+                                 data,
+                                 module = "org",
+                                 resource = "facility",
+                                 cc = cc,
+                                 )
+
+# -----------------------------------------------------------------------------
+def add_organisation_default_tags(organisation_id):
+    """
+        Add default tags to a new organisation
+
+        @param organisation_id: the organisation record ID
+    """
+
+    db = current.db
+    s3db = current.s3db
+
+    # Add default tags
+    otable = s3db.org_organisation
+    ttable = s3db.org_organisation_tag
+    rttable = ttable.with_alias("requester")
+    ittable = ttable.with_alias("orgid")
+
+    left = [rttable.on((rttable.organisation_id == otable.id) & \
+                        (rttable.tag == "REQUESTER") & \
+                        (rttable.deleted == False)),
+            ittable.on((ittable.organisation_id == otable.id) & \
+                        (ittable.tag == "OrgID") & \
+                        (ittable.deleted == False)),
+            ]
+    query = (otable.id == organisation_id)
+    row = db(query).select(otable.id,
+                           otable.uuid,
+                           rttable.id,
+                           ittable.id,
+                           left = left,
+                           limitby = (0, 1),
+                           ).first()
+    if row:
+        org = row.org_organisation
+
+        # Add REQUESTER-tag
+        rtag = row.requester
+        if not rtag.id:
+            ttable.insert(organisation_id = org.id,
+                            tag = "REQUESTER",
+                            value = "N",
+                            )
+
+        # Add OrgID-tag
+        itag = row.orgid
+        if not itag.id:
+            try:
+                uid = int(org.uuid[9:14], 16)
+            except (TypeError, ValueError):
+                import uuid
+                uid = int(uuid.uuid4().urn[9:14], 16)
+            value = "%06d%04d" % (uid, org.id)
+            ttable.insert(organisation_id = org.id,
+                            tag = "OrgID",
+                            value = value,
+                            )
+
+# -----------------------------------------------------------------------------
+def add_facility_default_tags(facility_id, approve=False):
+    """
+        Add default tags to a new facility
+
+        @param facility_id: the facility record ID
+        @param approve: whether called from approval-workflow
+    """
+
+    db = current.db
+    s3db = current.s3db
+
+    ftable = s3db.org_facility
+    ttable = s3db.org_site_tag
+
+    workflow = ("PUBLIC", "MPAV", "HYGIENE", "LAYOUT", "STATUS")
+
+    left = ttable.on((ttable.site_id == ftable.site_id) & \
+                     (ttable.tag.belongs(workflow)) & \
+                     (ttable.deleted == False))
+    query = (ftable.id == facility_id)
+    rows = db(query).select(ftable.site_id,
+                            ttable.id,
+                            ttable.tag,
+                            ttable.value,
+                            left = left,
+                            )
+    if not rows:
+        return
+    else:
+        site_id = rows.first().org_facility.site_id
+
+    existing = {row.org_site_tag.tag: row.org_site_tag.value
+                    for row in rows if row.org_site_tag.id}
+    public = existing.get("PUBLIC") == "Y" or approve
+
+    review = ("MPAV", "HYGIENE", "LAYOUT")
+    for tag in workflow:
+        if tag in existing:
+            continue
+        elif tag == "PUBLIC":
+            default = "Y" if public else "N"
+        elif tag == "STATUS":
+            if any(existing[t] == "REVISE" for t in review):
+                default = "REVISE"
+            elif any(existing[t] == "REVIEW" for t in review):
+                default = "REVIEW"
+            else:
+                default = "APPROVED" if public else "REVIEW"
+        else:
+            default = "APPROVED" if public else "REVISE"
+        ttable.insert(site_id = site_id,
+                      tag = tag,
+                      value = default,
+                      )
+        existing[tag] = default
+
+# -----------------------------------------------------------------------------
+def applicable_org_types(organisation_id, group=None, represent=False):
+    """
+        Look up organisation types by OrgGroup-tag
+
+        @param organisation_id: the record ID of an existing organisation
+        @param group: alternatively, the organisation group name
+        @param represent: include type labels in the result
+
+        @returns: a list of organisation type IDs, for filtering,
+                  or a dict {type_id: label}, for selecting
+    """
+
+    db = current.db
+    s3db = current.s3db
+
+    ttable = s3db.org_organisation_type_tag
+
+    if organisation_id:
+        # Look up the org groups of this record
+        gtable = s3db.org_group
+        mtable = s3db.org_group_membership
+        join = gtable.on(gtable.id == mtable.group_id)
+        query = (mtable.organisation_id == organisation_id) & \
+                (mtable.deleted == False)
+        rows = db(query).select(gtable.name, join=join)
+        groups = {row.name for row in rows}
+        q = (ttable.value.belongs(groups))
+
+        # Look up the org types the record is currently linked to
+        ltable = s3db.org_organisation_organisation_type
+        query = (ltable.organisation_id == organisation_id) & \
+                (ltable.deleted == False)
+        rows = db(query).select(ltable.organisation_type_id)
+        current_types = {row.organisation_type_id for row in rows}
+
+    elif group:
+        # Use group name as-is
+        q = (ttable.value == group)
+
+    # Look up all types tagged for this group
+    query = (ttable.tag == "OrgGroup") & q & \
+            (ttable.deleted == False)
+    rows = db(query).select(ttable.organisation_type_id,
+                            cache = s3db.cache,
+                            )
+    type_ids = {row.organisation_type_id for row in rows}
+
+    if organisation_id:
+        # Add the org types the record is currently linked to
+        type_ids |= current_types
+
+    if represent:
+        labels = ttable.organisation_type_id.represent
+        if hasattr(labels, "bulk"):
+            labels.bulk(list(type_ids))
+        output = {str(t): labels(t) for t in type_ids}
+    else:
+        output = list(type_ids)
+
+    return output
+
+# =============================================================================
+def facility_map_popup(record):
+    """
+        Custom map popup for facilities
+
+        @param record: the facility record (Row)
+
+        @returns: the map popup contents as DIV
+    """
+
+    db = current.db
+    s3db = current.s3db
+
+    T = current.T
+
+    table = s3db.org_facility
+
+    # Custom Map Popup
+    title = H4(record.name, _class="map-popup-title")
+
+    details = TABLE(_class="map-popup-details")
+    append = details.append
+
+    def formrow(label, value, represent=None):
+        return TR(TD("%s:" % label, _class="map-popup-label"),
+                  TD(represent(value) if represent else value),
+                  )
+
+    # Address
+    gtable = s3db.gis_location
+    query = (gtable.id == record.location_id)
+    location = db(query).select(gtable.addr_street,
+                                gtable.addr_postcode,
+                                gtable.L4,
+                                gtable.L3,
+                                limitby = (0, 1),
+                                ).first()
+
+    if location.addr_street:
+        append(formrow(gtable.addr_street.label, location.addr_street))
+    place = location.L4 or location.L3 or "?"
+    if location.addr_postcode:
+        place = "%s %s" % (location.addr_postcode, place)
+    append(formrow(T("Place"), place))
+
+    # Phone number
+    phone = record.phone1
+    if phone:
+        append(formrow(T("Phone"), phone))
+
+    # Email address (as hyperlink)
+    email = record.email
+    if email:
+        append(formrow(table.email.label, A(email, _href="mailto:%s" % email)))
+
+    # Opening Times
+    opening_times = record.opening_times
+    if opening_times:
+        append(formrow(table.opening_times.label, opening_times))
+
+    # Site services
+    stable = s3db.org_service
+    ltable = s3db.org_service_site
+    join = stable.on(stable.id == ltable.service_id)
+    query = (ltable.site_id == record.site_id) & \
+            (ltable.deleted == False)
+    rows = db(query).select(stable.name, join=join)
+    services = [row.name for row in rows]
+    if services:
+        append(formrow(T("Services"), ", ".join(services)))
+
+    # Comments
+    if record.comments:
+        append(formrow(table.comments.label,
+                        record.comments,
+                        represent = table.comments.represent,
+                        ))
+
+    return DIV(title, details, _class="map-popup")
+
+# =============================================================================
+class ServiceListRepresent(S3Represent):
+
+    always_list = True
+
+    def render_list(self, value, labels, show_link=True):
+        """
+            Helper method to render list-type representations from
+            bulk()-results.
+
+            @param value: the list
+            @param labels: the labels as returned from bulk()
+            @param show_link: render references as links, should
+                              be the same as used with bulk()
+        """
+
+        show_link = show_link and self.show_link
+
+        values = [v for v in value if v is not None]
+        if not len(values):
+            return ""
+
+        if show_link:
+            labels_ = (labels[v] if v in labels else self.default for v in values)
+        else:
+            labels_ = sorted(s3_str(labels[v]) if v in labels else self.default for v in values)
+
+        html = UL(_class="service-list")
+        for label in labels_:
+            html.append(LI(label))
+
+        return html
+
+# =============================================================================
+class OrganisationRepresent(S3Represent):
+    """
+        Custom representation of organisations showing the organisation type
+        - relevant for facility approval
+    """
+
+    def __init__(self, show_type=True, show_link=True):
+
+        super(OrganisationRepresent, self).__init__(lookup = "org_organisation",
+                                                    fields = ["name",],
+                                                    show_link = show_link,
+                                                    )
+        self.show_type = show_type
+        self.org_types = {}
+        self.type_names = {}
+
+    # -------------------------------------------------------------------------
+    def lookup_rows(self, key, values, fields=None):
+        """
+            Custom lookup method for organisation rows, does a
+            left join with the parent organisation. Parameters
+            key and fields are not used, but are kept for API
+            compatibility reasons.
+
+            @param values: the organisation IDs
+        """
+
+        db = current.db
+        s3db = current.s3db
+
+        otable = s3db.org_organisation
+
+        count = len(values)
+        if count == 1:
+            query = (otable.id == values[0])
+        else:
+            query = (otable.id.belongs(values))
+
+        rows = db(query).select(otable.id,
+                                otable.name,
+                                limitby = (0, count),
+                                )
+
+        if self.show_type:
+            ltable = s3db.org_organisation_organisation_type
+            if count == 1:
+                query = (ltable.organisation_id == values[0])
+            else:
+                query = (ltable.organisation_id.belongs(values))
+            query &= (ltable.deleted == False)
+            types = db(query).select(ltable.organisation_id,
+                                     ltable.organisation_type_id,
+                                     )
+
+            all_types = set()
+            org_types = self.org_types = {}
+
+            for t in types:
+
+                type_id = t.organisation_type_id
+                all_types.add(type_id)
+
+                organisation_id = t.organisation_id
+                if organisation_id not in org_types:
+                    org_types[organisation_id] = {type_id}
+                else:
+                    org_types[organisation_id].add(type_id)
+
+            if all_types:
+                ttable = s3db.org_organisation_type
+                query = ttable.id.belongs(all_types)
+                types = db(query).select(ttable.id,
+                                         ttable.name,
+                                         limitby = (0, len(all_types)),
+                                         )
+                self.type_names = {t.id: t.name for t in types}
+
+        return rows
+
+    # -------------------------------------------------------------------------
+    def represent_row(self, row, prefix=None):
+        """
+            Represent a single Row
+
+            @param row: the org_organisation Row
+            @param prefix: the hierarchy prefix (unused here)
+        """
+
+        name = s3_str(row.name)
+
+        if self.show_type:
+
+            T = current.T
+
+            type_ids = self.org_types.get(row.id)
+            if type_ids:
+                type_names = self.type_names
+                types = [s3_str(T(type_names[t]))
+                         for t in type_ids if t in type_names
+                         ]
+                name = "%s (%s)" % (name, ", ".join(types))
+
+        return name
+
+# =============================================================================
+class ContactRepresent(pr_PersonRepresentContact):
+    """
+        Visually enhanced version of pr_PersonRepresentContact
+    """
+
+    def represent_row(self, row):
+        """
+            Represent a row
+
+            @param row: the Row
+        """
+
+        output = DIV(SPAN(s3_fullname(row),
+                          _class = "contact-name",
+                          ),
+                     _class = "contact-repr",
+                     )
+
+        try:
+            pe_id = row.pe_id
+        except AttributeError:
+            pass
+        else:
+            if self.show_email:
+                email = self._email.get(pe_id)
+            if self.show_phone:
+                phone = self._phone.get(pe_id)
+            if email or phone:
+                details = DIV(_class="contact-details")
+                if email:
+                    details.append(DIV(ICON("mail"),
+                                       SPAN(A(email,
+                                              _href="mailto:%s" % email,
+                                              ),
+                                            _class = "contact-email"),
+                                       _class = "contact-info",
+                                       ))
+                if phone:
+                    details.append(DIV(ICON("phone"),
+                                       SPAN(phone,
+                                            _class = "contact-phone"),
+                                       _class = "contact-info",
+                                       ))
+                output.append(details)
+
+        return output
+
 # =============================================================================
 class InviteUserOrg(S3Method):
     """ Custom Method Handler to invite User Organisations """
@@ -479,7 +1312,6 @@ class InviteUserOrg(S3Method):
         if active or disabled:
             response.error = T("There are already user accounts registered for this organization")
 
-            from gluon import UL, LI
             from s3 import s3_format_fullname
 
             fullname = lambda user: s3_format_fullname(fname = user.first_name,
@@ -964,6 +1796,357 @@ class InvoicePDF(S3Method):
         ptable = s3db.fin_voucher_program
 
         query = (ptable.id == invoice.program_id) & \
+                (ptable.deleted == False)
+        program = db(query).select(ptable.id,
+                                   ptable.name,
+                                   ptable.unit,
+                                   limitby = (0, 1),
+                                   ).first()
+        if program:
+            data = {"title": program.name,
+                    "unit": program.unit,
+                    }
+        else:
+            data = {}
+
+        return data
+
+# =============================================================================
+class ClaimPDF(S3Method):
+    """
+        REST Method to generate a claim PDF
+        - for external accounting archives
+    """
+
+    def apply_method(self, r, **attr):
+        """
+            Generate a PDF of a Claim
+
+            @param r: the S3Request instance
+            @param attr: controller attributes
+        """
+
+        if r.representation != "pdf":
+            r.error(415, current.ERROR.BAD_FORMAT)
+        if not r.record or r.http != "GET":
+            r.error(400, current.ERROR.BAD_REQUEST)
+
+        T = current.T
+
+        # Filename to include invoice number if available
+        invoice_no = self.invoice_number(r.record)
+
+        from s3.s3export import S3Exporter
+        exporter = S3Exporter().pdf
+        return exporter(r.resource,
+                        request = r,
+                        method = "read",
+                        pdf_title = T("Compensation Claim"),
+                        pdf_filename = invoice_no if invoice_no else None,
+                        pdf_header = self.claim_header,
+                        pdf_callback = self.claim,
+                        pdf_footer = self.claim_footer,
+                        pdf_hide_comments = True,
+                        pdf_header_padding = 12,
+                        pdf_orientation = "Portrait",
+                        pdf_table_autogrow = "B",
+                        **attr
+                        )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def invoice_number(record):
+
+        invoice_id = record.invoice_id
+        if invoice_id:
+            s3db = current.s3db
+            itable = s3db.fin_voucher_invoice
+            query = (itable.id == invoice_id)
+            invoice = current.db(query).select(itable.invoice_no,
+                                               cache = s3db.cache,
+                                               limitby = (0, 1),
+                                               ).first()
+        else:
+            invoice = None
+
+        return invoice.invoice_no if invoice else None
+
+    # -------------------------------------------------------------------------
+    @classmethod
+    def claim_header(cls, r):
+        """
+            Generate the claim header
+
+            @param r: the S3Request
+        """
+
+        T = current.T
+
+        table = r.resource.table
+        itable = current.s3db.fin_voucher_invoice
+
+        claim = r.record
+        pdata = cls.lookup_header_data(claim)
+
+        place = [pdata.get(k) for k in ("addr_postcode", "addr_place")]
+
+        status = " " if claim.invoice_id else "(%s)" % T("not invoiced yet")
+
+        header = TABLE(TR(TD(DIV(H4(T("Compensation Claim")), P(status)),
+                             _colspan = 4,
+                             ),
+                          ),
+                       TR(TH(T("Invoicing Party")),
+                          TD(pdata.get("organisation", "-")),
+                          TH(T("Invoice No.")),
+                          TD(itable.invoice_no.represent(pdata.get("invoice_no"))),
+                          ),
+                       TR(TH(T("Address")),
+                          TD(pdata.get("addr_street", "-")),
+                          TH(itable.date.label),
+                          TD(itable.date.represent(pdata.get("invoice_date"))),
+                          ),
+                       TR(TH(T("Place")),
+                          TD(" ".join(v for v in place if v)),
+                          TH(T("Payers")),
+                          TD(pdata.get("payers")),
+                          ),
+                       TR(TH(T("Email")),
+                          TD(pdata.get("email", "-")),
+                          TH(T("Billing Date")),
+                          TD(table.date.represent(pdata.get("billing_date"))),
+                          ),
+                       )
+
+        return header
+
+    # -------------------------------------------------------------------------
+    @classmethod
+    def claim(cls, r):
+        """
+            Generate the claim body
+
+            @param r: the S3Request
+        """
+
+        T = current.T
+
+        table = r.table
+
+        claim = r.record
+        pdata = cls.lookup_body_data(claim)
+
+        # Lambda to format currency amounts
+        amt = lambda v: IS_FLOAT_AMOUNT.represent(v, precision=2, fixed=True)
+        currency = claim.currency
+
+        # Specification of costs
+        costs = TABLE(TR(TH(T("No.")),
+                         TH(T("Description")),
+                         TH(T("Number##count")),
+                         TH(T("Unit")),
+                         TH(table.price_per_unit.label),
+                         TH(T("Total")),
+                         TH(table.currency.label),
+                         ),
+                      TR(TD("1"), # only one line item here
+                         TD(pdata.get("title", "-")),
+                         TD(str(claim.quantity_total)),
+                         TD(pdata.get("unit", "-")),
+                         TD(amt(claim.price_per_unit)),
+                         TD(amt(claim.amount_receivable)),
+                         TD(currency),
+                         ),
+                      TR(TD(H5(T("Total")), _colspan=5),
+                         TD(H5(amt(claim.amount_receivable))),
+                         TD(H5(currency)),
+                         ),
+                      )
+
+        # Payment Details
+        an_field = table.account_number
+        an = an_field.represent(claim.account_number)
+        payment_details = TABLE(TR(TH(table.account_holder.label),
+                                   TD(claim.account_holder),
+                                   ),
+                                TR(TH(an_field.label),
+                                   TD(an),
+                                   ),
+                                TR(TH(table.bank_name.label),
+                                   TD(claim.bank_name),
+                                   ),
+                                )
+
+        return DIV(H4(" "),
+                   H5(T("Specification of Costs")),
+                   costs,
+                   H4(" "),
+                   H4(" "),
+                   H5(T("Payable within %(num)s days to") % {"num": 30}),
+                   payment_details,
+                   )
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def claim_footer(r):
+        """
+            Generate the claim footer
+
+            @param r: the S3Request
+        """
+
+        T = current.T
+
+        claim = r.record
+
+        # Details about who generated the document and when
+        user = current.auth.user
+        if not user:
+            username = T("anonymous user")
+        else:
+            username = s3_fullname(user)
+        now = S3DateTime.datetime_represent(current.request.utcnow, utc=True)
+        note = T("Document generated by %(user)s on %(date)s") % {"user": username,
+                                                                  "date": now,
+                                                                  }
+        # Details about the data source
+        vhash = claim.vhash
+        try:
+            verification = vhash.split("$$")[1][:7]
+        except (AttributeError, IndexError):
+            verification = T("invalid")
+
+        settings = current.deployment_settings
+        source = TABLE(TR(TH(T("System Name")),
+                          TD(settings.get_system_name()),
+                          ),
+                       TR(TH(T("Web Address")),
+                          TD(settings.get_base_public_url()),
+                          ),
+                       TR(TH(T("Data Source")),
+                          TD("%s [%s]" % (claim.uuid, verification)),
+                          ),
+                       )
+
+        return DIV(P(note), source)
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def lookup_header_data(claim):
+        """
+            Look up data for the claim header
+
+            @param claim: the claim record
+
+            @returns: dict with header data
+        """
+
+        db = current.db
+        s3db = current.s3db
+
+        data = {}
+
+        btable = s3db.fin_voucher_billing
+        itable = s3db.fin_voucher_invoice
+        ptable = s3db.fin_voucher_program
+        otable = s3db.org_organisation
+        ftable = s3db.org_facility
+        ltable = s3db.gis_location
+        ctable = s3db.pr_contact
+
+        # Look up the billing date
+        query = (btable.id == claim.billing_id)
+        billing = db(query).select(btable.date,
+                                   limitby = (0, 1),
+                                   ).first()
+        if billing:
+            data["billing_date"] = billing.date
+
+        # Look up invoice details
+        if claim.invoice_id:
+            query = (itable.id == claim.invoice_id)
+            invoice = db(query).select(itable.date,
+                                       itable.invoice_no,
+                                       limitby = (0, 1),
+                                       ).first()
+            if invoice:
+                data["invoice_no"] = invoice.invoice_no
+                data["invoice_date"] = invoice.date
+
+        # Use the program admin org as "payers"
+        query = (ptable.id == claim.program_id)
+        join = otable.on(otable.id == ptable.organisation_id)
+        admin_org = db(query).select(otable.name,
+                                     join = join,
+                                     limitby = (0, 1),
+                                     ).first()
+        if admin_org:
+            data["payers"] = admin_org.name
+
+        # Look up details of the invoicing party
+        query = (otable.pe_id == claim.pe_id) & \
+                (otable.deleted == False)
+        organisation = db(query).select(otable.id,
+                                        otable.name,
+                                        limitby = (0, 1),
+                                        ).first()
+        if organisation:
+
+            data["organisation"] = organisation.name
+
+            # Email address
+            query = (ctable.pe_id == claim.pe_id) & \
+                    (ctable.contact_method == "EMAIL") & \
+                    (ctable.deleted == False)
+            email = db(query).select(ctable.value,
+                                     limitby = (0, 1),
+                                     ).first()
+            if email:
+                data["email"] = email.value
+
+            # Facility address
+            query = (ftable.organisation_id == organisation.id) & \
+                    (ftable.obsolete == False) & \
+                    (ftable.deleted == False)
+            left = ltable.on(ltable.id == ftable.location_id)
+            facility = db(query).select(ftable.email,
+                                        ltable.addr_street,
+                                        ltable.addr_postcode,
+                                        ltable.L3,
+                                        ltable.L4,
+                                        left = left,
+                                        limitby = (0, 1),
+                                        orderby = ftable.created_on,
+                                        ).first()
+            if facility:
+                if data.get("email"):
+                    # Fallback
+                    data["email"] = facility.org_facility.email
+
+                location = facility.gis_location
+                data["addr_street"] = location.addr_street or "-"
+                data["addr_postcode"] = location.addr_postcode or "-"
+                data["addr_place"] = location.L4 or location.L3 or "-"
+
+        return data
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def lookup_body_data(claim):
+        """
+            Look up additional data for claim body
+
+            @param claim: the claim record
+
+            @returns: dict with claim data
+        """
+
+        db = current.db
+        s3db = current.s3db
+
+        ptable = s3db.fin_voucher_program
+
+        query = (ptable.id == claim.program_id) & \
                 (ptable.deleted == False)
         program = db(query).select(ptable.id,
                                    ptable.name,

@@ -62,7 +62,7 @@ def shelter_unit():
             record_id = r.id
             table = s3db.cr_shelter_unit
             row = db(table.id == record_id).select(table.shelter_id,
-                                                   limitby=(0, 1)
+                                                   limitby = (0, 1)
                                                    ).first()
             shelter_id = row.shelter_id
             s3db.configure("cr_shelter_unit",
@@ -95,7 +95,7 @@ def shelter_registration():
         msg_record_created = T("Registration added"),
         msg_record_modified = T("Registration updated"),
         msg_record_deleted = T("Registration entry deleted"),
-        msg_list_empty = T("No people currently registered in this shelter")
+        msg_list_empty = T("No people currently registered in shelters")
         )
 
     output = s3_rest_controller()

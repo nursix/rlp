@@ -11,9 +11,10 @@ from collections import OrderedDict
 
 from gluon import current, URL, A, DIV, TAG, \
                   IS_EMPTY_OR, IS_IN_SET, IS_INT_IN_RANGE, IS_NOT_EMPTY
+
 from gluon.storage import Storage
 
-from s3 import FS, IS_FLOAT_AMOUNT, IS_ONE_OF, S3Represent, s3_str
+from s3 import FS, IS_FLOAT_AMOUNT, ICON, IS_ONE_OF, S3Represent, s3_str
 from s3dal import original_tablename
 
 from .rlpgeonames import rlp_GeoNames
@@ -21,6 +22,7 @@ from .rlpgeonames import rlp_GeoNames
 LSJV = "Landesamt für Soziales, Jugend und Versorgung"
 SCHOOLS = "Schulen"
 TESTSTATIONS = "COVID-19 Teststellen"
+GOVERNMENT = "Regierungsstellen"
 
 ISSUER_ORG_TYPE = "pe_id$pe_id:org_organisation.org_organisation_organisation_type.organisation_type_id"
 
@@ -214,6 +216,10 @@ def config(settings):
     settings.ui.calendar_clear_icon = True
 
     # -------------------------------------------------------------------------
+    # Custom settings
+    settings.custom.test_station_registration = False
+
+    # -------------------------------------------------------------------------
     # Realm Rules
     #
     def rlpptm_realm_entity(table, row):
@@ -310,6 +316,18 @@ def config(settings):
             if program:
                 realm_entity = program.realm_entity
 
+        elif tablename in ("inv_send", "inv_recv"):
+            # Shipments inherit realm-entity from the sending/receiving site
+            table = s3db.table(tablename)
+            stable = s3db.org_site
+            query = (table._id == row.id) & \
+                    (stable.site_id == table.site_id)
+            site = db(query).select(stable.realm_entity,
+                                    limitby = (0, 1),
+                                    ).first()
+            if site:
+                realm_entity = site.realm_entity
+
         return realm_entity
 
     settings.auth.realm_entity = rlpptm_realm_entity
@@ -387,7 +405,16 @@ def config(settings):
 
         s3db = current.s3db
 
-        from s3 import S3SQLCustomForm, S3SQLInlineComponent, S3SQLInlineLink
+        table = s3db.cms_post
+
+        from s3 import S3SQLCustomForm, \
+                       S3SQLInlineComponent, \
+                       S3SQLInlineLink, \
+                       s3_text_represent
+
+        field = table.body
+        field.represent = lambda v, row=None: \
+                          s3_text_represent(v, lines=20, _class = "cms-item-body")
 
         record = r.record
         if r.tablename == "cms_series" and \
@@ -476,6 +503,40 @@ def config(settings):
         return attr
 
     settings.customise_cms_post_controller = customise_cms_post_controller
+
+    # -------------------------------------------------------------------------
+    def customise_doc_document_resource(r, tablename):
+
+        if r.controller == "org" or r.function == "organisation":
+
+            s3db = current.s3db
+            table = s3db.doc_document
+
+            # Hide URL field
+            field = table.url
+            field.readable = field.writable = False
+
+            # Custom label for date-field
+            field = table.date
+            field.label = T("Uploaded on")
+            field.default = r.utcnow.date()
+            field.writable = False
+
+            # Custom label for name-field
+            field = table.name
+            field.label = T("Title")
+
+            # List fields
+            list_fields = ["name",
+                           "file",
+                           "date",
+                           "comments",
+                           ]
+            s3db.configure("doc_document",
+                           list_fields = list_fields,
+                           )
+
+    settings.customise_doc_document_resource = customise_doc_document_resource
 
     # -------------------------------------------------------------------------
     def customise_disease_case_diagnostics_resource(r, tablename):
@@ -1029,16 +1090,22 @@ def config(settings):
 
         # Report options
         if r.method == "report":
+            field = table.created_by
+            field.represent = s3db.auth_UserRepresent(show_name = True,
+                                                      show_email = False,
+                                                      )
             facts = ((T("Total Services Rendered"), "sum(quantity)"),
                      (T("Number of Accepted Vouchers"), "count(id)"),
                      (T("Remaining Compensation Claims"), "sum(balance)"),
                      )
             axes = ["program_id",
-                    "pe_id",
                     "status",
                     ]
-            if current.auth.s3_has_role("PROGRAM_MANAGER"):
+            has_role = auth.s3_has_role
+            if has_role("PROGRAM_MANAGER"):
                 axes.insert(0, "pe_id")
+            if has_role("VOUCHER_PROVIDER"):
+                axes.append((T("User"), "created_by"))
             report_options = {
                 "rows": axes,
                 "cols": axes,
@@ -1456,6 +1523,14 @@ def config(settings):
                        filter_widgets = filter_widgets,
                        list_fields = list_fields,
                        )
+
+        # PDF export method
+        from .helpers import ClaimPDF
+        s3db.set_method("fin", "voucher_claim",
+                        method = "record",
+                        action = ClaimPDF,
+                        )
+
         s3db.add_custom_callback("fin_voucher_claim",
                                  "onaccept",
                                  claim_create_onaccept,
@@ -1495,6 +1570,41 @@ def config(settings):
 
             return result
         s3.prep = prep
+
+        standard_postp = s3.postp
+        def custom_postp(r, output):
+
+            # Call standard postp
+            if callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if not r.component and isinstance(output, dict):
+                record = r.record
+                if record and r.method in (None, "update", "read"):
+
+                    # Hint that the user need to confirm the claim
+                    if record.status == "NEW" and \
+                       all(record[fn] for fn in ("account_holder", "account_number")):
+                        current.response.warning = T('You must change the status to "confirmed" before an invoice can be issued')
+
+                    # Custom CRUD buttons
+                    if "buttons" not in output:
+                        buttons = output["buttons"] = {}
+                    else:
+                        buttons = output["buttons"]
+
+                    # PDF-button
+                    pdf_download = A(T("Download PDF"),
+                                     _href = "/%s/fin/voucher_claim/%s/record.pdf" % \
+                                             (r.application, record.id),
+                                     _class="action-btn",
+                                     )
+
+                    # Render in place of the delete-button
+                    buttons["delete_btn"] = TAG[""](pdf_download,
+                                                    )
+            return output
+        s3.postp = custom_postp
 
         return attr
 
@@ -1623,16 +1733,16 @@ def config(settings):
         from s3 import S3PriorityRepresent
         field = table.status
         try:
-            status_opts = field.represent.options
+            status_opts = field.requires.options()
         except AttributeError:
-            pass
+            status_opts = []
         else:
             field.represent = S3PriorityRepresent(status_opts,
                                                   {"NEW": "lightblue",
                                                    "APPROVED": "blue",
                                                    "REJECTED": "red",
                                                    "PAID": "green",
-                                                   }).represent
+                                                   })
 
         is_accountant = auth.s3_has_role("PROGRAM_ACCOUNTANT")
 
@@ -1754,171 +1864,14 @@ def config(settings):
     settings.customise_fin_voucher_invoice_controller = customise_fin_voucher_invoice_controller
 
     # -------------------------------------------------------------------------
-    def customise_org_facility_resource(r, tablename):
-
-        from s3 import S3SQLCustomForm, S3SQLInlineLink, \
-                       S3LocationSelector, S3LocationFilter, S3TextFilter
-
-        s3db = current.s3db
-
-        s3db.org_facility.location_id.widget = S3LocationSelector(levels = ("L1", "L2", "L3", "L4"),
-                                                                  required_levels = ("L1", "L2", "L3"),
-                                                                  show_address = True,
-                                                                  show_postcode = True,
-                                                                  show_map = True,
-                                                                  )
-
-        # Geocoder
-        current.response.s3.scripts.append("/%s/static/themes/RLP/js/geocoderPlugin.js" % r.application)
-
-        text_fields = ["name",
-                       #"code",
-                       #"comments",
-                       #"organisation_id$name",
-                       #"organisation_id$acronym",
-                       #"location_id$L1",
-                       "location_id$L2",
-                       "location_id$L3",
-                       "location_id$L4",
-                       "location_id$addr_postcode",
-                       ]
-
-        filter_widgets = [
-            S3TextFilter(text_fields,
-                         label = T("Search"),
-                         #_class = "filter-search",
-                         ),
-            S3LocationFilter("location_id",
-                             #label = T("Location"),
-                             levels = ("L1", "L2", "L3", "L4"),
-                             bigtable = True,
-                             translate = False,
-                             ),
-            ]
-
-        crud_fields = ["name",
-                       S3SQLInlineLink(
-                              "facility_type",
-                              label = T("Facility Type"),
-                              field = "facility_type_id",
-                              widget = "groupedopts",
-                              cols = 3,
-                        ),
-                       #"organisation_id",
-                       "location_id",
-                       (T("Telephone"), "phone1"),
-                       "email",
-                       (T("Opening Hours"), "opening_times"),
-                       #"obsolete",
-                       "comments",
-                       ]
-
-        list_fields = ["name",
-                       #"site_facility_type.facility_type_id",
-                       (T("Telephone"), "phone1"),
-                       "email",
-                       (T("Opening Hours"), "opening_times"),
-                       "location_id$addr_street",
-                       "location_id$addr_postcode",
-                       "location_id$L4",
-                       "location_id$L3",
-                       "location_id$L2",
-                       #"location_id$L1",
-                       #"organisation_id",
-                       #"obsolete",
-                       #"comments",
-                       ]
-
-        s3db.configure(tablename,
-                       crud_form = S3SQLCustomForm(*crud_fields),
-                       filter_widgets = filter_widgets,
-                       list_fields = list_fields,
-                       )
-
-    settings.customise_org_facility_resource = customise_org_facility_resource
-
-    # -------------------------------------------------------------------------
-    def customise_org_facility_controller(**attr):
-
-        s3 = current.response.s3
-
-        # Load model for default CRUD strings
-        current.s3db.table("org_facility")
-
-        s3.crud_strings.org_facility.title_list = T("Find Test Station")
-
-        # Custom prep
-        standard_prep = s3.prep
-        def prep(r):
-            # Call standard prep
-            result = standard_prep(r) if callable(standard_prep) else True
-
-            resource = r.resource
-
-            record = r.record
-            if not record:
-                # Filter list by project code
-                # - re-use last used $$code filter of this session
-                # - default to original subset for consistency in bookmarks/links
-                session_s3 = current.session.s3
-                default_filter = session_s3.get("rlp_facility_filter", "TESTS-SCHOOLS")
-                code = r.get_vars.get("$$code", default_filter)
-                if code:
-                    session_s3.rlp_facility_filter = code
-                    query = FS("~.organisation_id$project.code") == code
-                    resource.add_filter(query)
-                    if code == "TESTS-SCHOOLS":
-                        s3.crud_strings.org_facility.title_list = T("Test Stations for School and Child Care Staff")
-                    elif code == "TESTS-PUBLIC":
-                        s3.crud_strings.org_facility.title_list = T("Test Stations for Everybody")
-            else:
-                s3db = current.s3db
-                auth = current.auth
-                if not auth.s3_has_role("ORG_GROUP_ADMIN") and \
-                   not auth.s3_has_role("ORG_ADMIN", for_pe=record.pe_id):
-                    s3.hide_last_update = True
-
-                    table = resource.table
-
-                    field = table.obsolete
-                    field.readable = field.writable = False
-
-                    field = table.organisation_id
-                    field.represent = s3db.org_OrganisationRepresent(show_link=False)
-
-            resource.configure(summary = ({"name": "table",
-                                           "label": "Table",
-                                           "widgets": [{"method": "datatable"}]
-                                           },
-                                          {"name": "map",
-                                           "label": "Map",
-                                           "widgets": [{"method": "map", "ajax_init": True}],
-                                           },
-                                          ),
-                               )
-
-            return result
-        s3.prep = prep
-
-        # Custom rheader
-        #from .rheaders import rlpptm_org_rheader
-        #attr = dict(attr)
-        #attr["rheader"] = rlpptm_org_rheader
-        attr["rheader"] = None
-
-        # No Side Menu
-        current.menu.options = None
-
-        return attr
-
-    settings.customise_org_facility_controller = customise_org_facility_controller
-
-    # -------------------------------------------------------------------------
-    def customise_org_organisation_resource(r, tablename):
+    def add_org_tags():
+        """
+            Add organisation tags as filtered components,
+            for embedding in form, filtering and as report axis
+        """
 
         s3db = current.s3db
 
-        # Tags as filtered components (for embedding in form)
         s3db.add_components("org_organisation",
                             org_organisation_tag = ({"name": "requester",
                                                      "joinby": "organisation_id",
@@ -1927,6 +1880,63 @@ def config(settings):
                                                      },
                                                     ),
                             )
+
+    # -------------------------------------------------------------------------
+    def organisation_create_onaccept(form):
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        from .helpers import add_organisation_default_tags
+        add_organisation_default_tags(record_id)
+
+    # -------------------------------------------------------------------------
+    def customise_org_organisation_resource(r, tablename):
+
+        s3db = current.s3db
+
+        # Add binary organisation tags
+        add_org_tags()
+
+        # Reports configuration
+        if r.method == "report":
+            axes = ["facility.location_id$L3",
+                    "facility.location_id$L2",
+                    "facility.location_id$L1",
+                    "facility.service_site.service_id",
+                    (T("Project"), "project.name"),
+                    (T("Organization Group"), "group_membership.group_id"),
+                    ]
+
+            report_options = {
+                "rows": axes,
+                "cols": axes,
+                "fact": [(T("Number of Organizations"), "count(id)"),
+                         (T("Number of Facilities"), "count(facility.id)"),
+                        ],
+                "defaults": {"rows": "facility.location_id$L2",
+                             "cols": None,
+                             "fact": "count(id)",
+                             "totals": True,
+                             },
+                }
+
+            s3db.configure(tablename,
+                           report_options = report_options,
+                           )
+
+        # Custom onaccept to create default tags
+        s3db.add_custom_callback("org_organisation",
+                                 "onaccept",
+                                 organisation_create_onaccept,
+                                 method = "create",
+                                 )
 
     settings.customise_org_organisation_resource = customise_org_organisation_resource
 
@@ -1952,16 +1962,8 @@ def config(settings):
             is_org_group_admin = auth.s3_has_role("ORG_GROUP_ADMIN")
 
             # Configure binary tags
-            binary_tag_opts = {"Y": T("Yes"), "N": T("No")}
-            for cname in ("requester",):
-                component = resource.components.get(cname)
-                table = component.table
-                field = table.value
-                field.default = "N"
-                field.requires = IS_IN_SET(binary_tag_opts,
-                                           zero = None,
-                                           )
-                field.represent = lambda v, row=None: binary_tag_opts.get(v, "-")
+            from .helpers import configure_binary_tags
+            configure_binary_tags(resource, ("requester",))
 
             # Add invite-method for ORG_GROUP_ADMIN role
             from .helpers import InviteUserOrg
@@ -1993,6 +1995,7 @@ def config(settings):
                         query = FS("group.id") == org_group_id
                     resource.add_filter(query)
 
+            record = r.record
             if not r.component:
                 if r.interactive:
 
@@ -2009,7 +2012,6 @@ def config(settings):
 
                     # Custom form
                     if is_org_group_admin:
-                        record = r.record
                         user = auth.user
                         if record and user:
                             # Only OrgGroupAdmins managing this organisation can change
@@ -2105,6 +2107,15 @@ def config(settings):
                 r.resource.configure(list_fields = list_fields,
                                      )
 
+            elif r.component_name == "facility":
+                if r.component_id and \
+                   (is_org_group_admin or \
+                    record and auth.s3_has_role("ORG_ADMIN", for_pe=record.pe_id)):
+                    # Expose obsolete-flag
+                    ctable = r.component.table
+                    field = ctable.obsolete
+                    field.readable = field.writable = True
+
             return result
         s3.prep = prep
 
@@ -2116,6 +2127,687 @@ def config(settings):
         return attr
 
     settings.customise_org_organisation_controller = customise_org_organisation_controller
+
+    # -------------------------------------------------------------------------
+    def customise_org_organisation_type_resource(r, tablename):
+
+        db = current.db
+        s3db = current.s3db
+
+        s3db.add_components("org_organisation_type",
+                            org_organisation_type_tag = ({"name": "group",
+                                                          "joinby": "organisation_type_id",
+                                                          "filterby": {"tag": "OrgGroup"},
+                                                          "multiple": False,
+                                                          },
+                                                         {"name": "commercial",
+                                                          "joinby": "organisation_type_id",
+                                                          "filterby": {"tag": "Commercial"},
+                                                          "multiple": False,
+                                                          },
+                                                         ),
+                            )
+
+        if r.tablename == "org_organisation_type":
+
+            T = current.T
+
+            resource = r.resource
+            component = resource.components.get("group")
+            if component:
+
+                # Look up organisation group names
+                gtable = s3db.org_group
+                groups = db(gtable.deleted == False).select(gtable.name,
+                                                            cache = s3db.cache,
+                                                            )
+                options = [group.name for group in groups]
+
+                # Configure them as options for the OrgGroup tag
+                ctable = component.table
+                field = ctable.value
+                field.label = T("Organization Group")
+                field.requires = IS_EMPTY_OR(IS_IN_SET(options))
+
+            # Configure binary tag representation
+            from .helpers import configure_binary_tags
+            configure_binary_tags(r.resource, ("commercial",))
+
+            # Custom form
+            from s3 import S3SQLCustomForm
+            crud_form = S3SQLCustomForm("name",
+                                        "group.value",
+                                        (T("Commercial Providers"), "commercial.value"),
+                                        "comments",
+                                        )
+
+            # Include tags in list view
+            list_fields = ["id",
+                           "name",
+                           "group.value",
+                           (T("Commercial Providers"), "commercial.value"),
+                           "comments",
+                           ]
+
+            resource.configure(crud_form = crud_form,
+                               list_fields = list_fields,
+                               )
+
+    settings.customise_org_organisation_type_resource = customise_org_organisation_type_resource
+
+    # -------------------------------------------------------------------------
+    def facility_create_onaccept(form):
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        from .helpers import add_facility_default_tags
+        add_facility_default_tags(record_id)
+
+    # -------------------------------------------------------------------------
+    def facility_postprocess(form):
+
+        # Get record ID
+        form_vars = form.vars
+        if "id" in form_vars:
+            record_id = form_vars.id
+        elif hasattr(form, "record_id"):
+            record_id = form.record_id
+        else:
+            return
+
+        # Lookup site_id
+        table = current.s3db.org_facility
+        row = current.db(table.id == record_id).select(table.site_id,
+                                                       limitby = (0, 1),
+                                                       ).first()
+        if row and row.site_id:
+            # Update approval workflow
+            from .helpers import facility_approval_workflow
+            facility_approval_workflow(row.site_id)
+
+    # -------------------------------------------------------------------------
+    def customise_org_facility_resource(r, tablename):
+
+        auth = current.auth
+        s3db = current.s3db
+
+        is_org_group_admin = current.auth.s3_has_role("ORG_GROUP_ADMIN")
+
+        # Approval workflow tags as filtered components (for embedding in form)
+        add_org_tags()
+        s3db.add_components("org_site",
+                            org_site_tag = (# Approval workflow status
+                                            {"name": "status",
+                                             "joinby": "site_id",
+                                             "filterby": {"tag": "STATUS"},
+                                             "multiple": False,
+                                             },
+                                            # MPAV qualification
+                                            {"name": "mpav",
+                                             "joinby": "site_id",
+                                             "filterby": {"tag": "MPAV"},
+                                             "multiple": False,
+                                             },
+                                            # Hygiene concept
+                                            {"name": "hygiene",
+                                             "joinby": "site_id",
+                                             "filterby": {"tag": "HYGIENE"},
+                                             "multiple": False,
+                                             },
+                                            # Facility layout
+                                            {"name": "layout",
+                                             "joinby": "site_id",
+                                             "filterby": {"tag": "LAYOUT"},
+                                             "multiple": False,
+                                             },
+                                            # In public registry
+                                            {"name": "public",
+                                             "joinby": "site_id",
+                                             "filterby": {"tag": "PUBLIC"},
+                                             "multiple": False,
+                                             },
+                                            ),
+                            )
+
+        # Custom onaccept to add default tags
+        s3db.add_custom_callback("org_facility",
+                                 "onaccept",
+                                 facility_create_onaccept,
+                                 method = "create",
+                                 )
+
+        if not is_org_group_admin and \
+           not settings.get_custom(key="test_station_registration"):
+            # If test station registration is disabled, no new test
+            # facilities can be added either
+            s3db.configure(tablename, insertable = False)
+
+        # Configure fields
+        in_org_controller = r.tablename == "org_organisation"
+        from s3 import (S3SQLCustomForm,
+                        S3SQLInlineLink,
+                        S3SQLInlineComponent,
+                        S3LocationFilter,
+                        S3LocationSelector,
+                        S3OptionsFilter,
+                        S3TextFilter,
+                        S3WithIntro,
+                        s3_get_filter_opts,
+                        s3_text_represent,
+                        )
+
+        table = s3db.org_facility
+
+        # Custom representation of organisation_id including type
+        field = table.organisation_id
+        from .helpers import OrganisationRepresent
+        field.represent = OrganisationRepresent()
+        field.comment = None
+
+        # Configure location selector incl. Geocoder
+        field = table.location_id
+        # Address/Postcode are required
+        # - except for OrgGroupAdmin, who need to be able to
+        #   update the record even when this detail is missing
+        address_required = not is_org_group_admin
+        field.widget = S3LocationSelector(levels = ("L1", "L2", "L3", "L4"),
+                                          required_levels = ("L1", "L2", "L3"),
+                                          show_address = True,
+                                          show_postcode = True,
+                                          address_required = address_required,
+                                          postcode_required = address_required,
+                                          show_map = True,
+                                          )
+        current.response.s3.scripts.append("/%s/static/themes/RLP/js/geocoderPlugin.js" % r.application)
+
+        # Custom tooltip for comments field
+        field = table.comments
+        if in_org_controller:
+            field.comment = DIV(_class="tooltip",
+                                _title="%s|%s" % (T("Comments"),
+                                                  T("Additional information and advice regarding facility and services"),
+                                                  ),
+                                )
+        else:
+            field.writable = False
+            field.comment = None
+
+        # Custom label for obsolete-Flag
+        field = table.obsolete
+        field.label = T("Defunct")
+        field.represent = lambda v, row=None: ICON("remove") if v else ""
+        field.comment = DIV(_class="tooltip",
+                            _title="%s|%s" % (T("Defunct"),
+                                              T("Please mark this field when the facility is no longer in operation"),
+                                              ),
+                            )
+
+        # Opening times are mandatory
+        # - except for OrgGroupAdmin, who need to be able to
+        #   update the record even when this detail is missing
+        if not is_org_group_admin:
+            field = table.opening_times
+            field.requires = IS_NOT_EMPTY()
+
+        # Custom representation of service links
+        stable = s3db.org_service_site
+        field = stable.service_id
+        from .helpers import ServiceListRepresent
+        field.represent = ServiceListRepresent(lookup = "org_service",
+                                               show_link = False,
+                                               )
+
+        # Expose site details
+        dtable = s3db.org_site_details
+        field = dtable.booking_mode_id
+        field.readable = True
+        field.writable = in_org_controller
+
+        field = dtable.service_mode_id
+        field.readable = True
+        field.writable = in_org_controller
+        requires = field.requires
+        if isinstance(requires, IS_EMPTY_OR):
+            field.requires = requires.other
+
+        field = dtable.authorisation_advice
+        field.label = T("Advice")
+        css = "approve-workflow"
+        field.represent = lambda v, row=None: \
+                            s3_text_represent(v,
+                                truncate = False,
+                                _class = ("%s workflow-advice" % css) if v else css,
+                                )
+        field.readable = True
+        if is_org_group_admin:
+            field.comment = DIV(_class="tooltip",
+                                _title="%s|%s" % (T("Advice"),
+                                                  T("Instructions/advice for the test station how to proceed with regard to authorization"),
+                                                  ),
+                                )
+            field.writable = True
+        else:
+            field.writable = False
+
+        # Custom list fields
+        list_fields = ["name",
+                       #"organisation_id",
+                       (T("Telephone"), "phone1"),
+                       "email",
+                       (T("Opening Hours"), "opening_times"),
+                       "service_site.service_id",
+                       "location_id$addr_street",
+                       "location_id$addr_postcode",
+                       "location_id$L4",
+                       "location_id$L3",
+                       "location_id$L2",
+                       ]
+
+        get_vars = r.get_vars
+        if is_org_group_admin and not in_org_controller:
+            pending = get_vars.get("$$pending") == "1"
+            review = get_vars.get("$$review") == "1"
+        else:
+            pending = review = False
+
+        if pending or review:
+            list_fields.insert(1, "organisation_id")
+        elif in_org_controller:
+            list_fields.append("obsolete")
+
+        # Custom filter widgets
+        text_fields = ["name",
+                       "location_id$L2",
+                       "location_id$L3",
+                       "location_id$L4",
+                       "location_id$addr_postcode",
+                       ]
+
+        filter_widgets = [
+            S3TextFilter(text_fields,
+                         label = T("Search"),
+                         ),
+            S3LocationFilter("location_id",
+                             levels = ("L1", "L2", "L3", "L4"),
+                             bigtable = True,
+                             translate = False,
+                             ),
+            S3OptionsFilter("service_site.service_id",
+                            label = T("Services"),
+                            options = lambda: s3_get_filter_opts("org_service"),
+                            cols = 1,
+                            hidden = True,
+                            ),
+            ]
+        if is_org_group_admin:
+            binary_tag_opts = OrderedDict([("Y", T("Yes")), ("N", T("No"))])
+            filter_widgets.extend([
+                S3OptionsFilter("organisation_id$requester.value",
+                                label = T("Can order equipment"),
+                                options = binary_tag_opts,
+                                hidden = True,
+                                ),
+                S3OptionsFilter("organisation_id$organisation_type__link.organisation_type_id",
+                                hidden = True,
+                                options = lambda: s3_get_filter_opts("org_organisation_type",
+                                                                     translate = True,
+                                                                     ),
+                                ),
+                ])
+            if r.method == "report":
+                filter_widgets.extend([
+                    S3OptionsFilter("organisation_id$project_organisation.project_id",
+                                    options = lambda: s3_get_filter_opts("project_project"),
+                                    hidden = True,
+                                    ),
+                    S3OptionsFilter("public.value",
+                                    label = T("In Public Registry"),
+                                    options = binary_tag_opts,
+                                    hidden = True,
+                                    ),
+                    ])
+
+        # Custom CRUD form
+        visible_tags = subheadings = postprocess = None
+        record = r.record
+        public_view = r.tablename == "org_facility" and \
+                        (not record or
+                         not auth.s3_has_permission("update", r.table, record_id=record.id))
+        if public_view:
+            crud_fields = ["name",
+                           S3SQLInlineLink(
+                                "facility_type",
+                                label = T("Facility Type"),
+                                field = "facility_type_id",
+                                widget = "groupedopts",
+                                cols = 3,
+                                ),
+                           "location_id",
+                           (T("Opening Hours"), "opening_times"),
+                           "site_details.service_mode_id", # not showing - why?
+                           S3SQLInlineLink(
+                                "service",
+                                label = T("Services"),
+                                field = "service_id",
+                                widget = "groupedopts",
+                                cols = 1,
+                                ),
+                           (T("Telephone"), "phone1"),
+                           "email",
+                           "website",
+                           (T("Appointments via"), "site_details.booking_mode_id"), # not showing - why?
+                           "comments",
+                           ]
+        else:
+            organisation = obsolete = services = documents = None
+
+            resource = r.resource
+            if r.tablename == "org_facility":
+                # Primary controller
+                fresource = resource
+                record_id = r.id
+                obsolete = None
+            elif r.tablename == "org_organisation" and \
+                 r.component_name == "facility":
+                # Facility tab of organisation
+                fresource = resource.components.get("facility")
+                record_id = r.component_id
+                obsolete = "obsolete"
+            else:
+                # Other view
+                fresource = record_id = None
+                obsolete = None
+
+            if fresource:
+                table = fresource.table
+
+                # Inline service selector and documents
+                services = S3SQLInlineLink(
+                                "service",
+                                label = T("Services"),
+                                field = "service_id",
+                                widget = "groupedopts",
+                                cols = 1,
+                                )
+                documents = S3SQLInlineComponent(
+                                "document",
+                                name = "file",
+                                label = T("Documents"),
+                                fields = ["name", "file", "comments"],
+                                filterby = {"field": "file",
+                                            "options": "",
+                                            "invert": True,
+                                            },
+                                )
+
+                from .helpers import configure_workflow_tags
+                if is_org_group_admin:
+                    # Show organisation
+                    organisation = "organisation_id"
+
+                    # Workflow tags
+                    if record_id:
+                        visible_tags = configure_workflow_tags(fresource,
+                                                               role = "approver",
+                                                               record_id = record_id,
+                                                               )
+                else:
+                    # Add Intros for services and documents
+                    services = S3WithIntro(services,
+                                           intro = ("org",
+                                                    "facility",
+                                                    "SiteServiceIntro",
+                                                    ),
+                                           )
+                    documents = S3WithIntro(documents,
+                                            intro = ("org",
+                                                     "facility",
+                                                     "SiteDocumentsIntro",
+                                                     ),
+                                            )
+                    # Workflow tags
+                    if record_id:
+                        visible_tags = configure_workflow_tags(fresource,
+                                                               role = "applicant",
+                                                               record_id = record_id,
+                                                               )
+
+            crud_fields = [organisation,
+                           # -- Facility
+                           "name",
+                           S3SQLInlineLink(
+                                "facility_type",
+                                label = T("Facility Type"),
+                                field = "facility_type_id",
+                                widget = "groupedopts",
+                                cols = 3,
+                                ),
+                           # -- Address
+                           "location_id",
+                           # -- Service Offer
+                           (T("Opening Hours"), "opening_times"),
+                           "site_details.service_mode_id",
+                           services,
+                           # -- Appointments and Contact
+                           (T("Telephone"), "phone1"),
+                           "email",
+                           "website",
+                           (T("Appointments via"), "site_details.booking_mode_id"),
+                           "comments",
+                           # -- Administrative
+                           documents,
+                           obsolete,
+                           ]
+            subheadings = {"name": T("Facility"),
+                           "location_id": T("Address"),
+                           "opening_times": T("Service Offer"),
+                           "phone1": T("Contact and Appointments"),
+                           "filedocument": T("Administrative"),
+                           }
+
+            if visible_tags:
+                # Append workflow tags in separate section
+                crud_fields.extend(visible_tags)
+                fname = visible_tags[0][1].replace(".", "_")
+                subheadings[fname] = T("Approval and Publication")
+
+                # Add postprocess to update workflow statuses
+                postprocess = facility_postprocess
+
+        s3db.configure(tablename,
+                       crud_form = S3SQLCustomForm(*crud_fields,
+                                                   postprocess = postprocess,
+                                                   ),
+                       subheadings = subheadings,
+                       filter_widgets = filter_widgets,
+                       list_fields = list_fields,
+                       )
+
+        # Report options
+        if r.method == "report":
+            axes = ["organisation_id",
+                    "location_id$L3",
+                    "location_id$L2",
+                    "location_id$L1",
+                    "service_site.service_id",
+                    (T("Project"), "organisation_id$project.name"),
+                    (T("Organization Group"), "organisation_id$group_membership.group_id"),
+                    (T("Requested Items"), "req.req_item.item_id"),
+                    ]
+
+            report_options = {
+                "rows": axes,
+                "cols": axes,
+                "fact": [(T("Number of Facilities"), "count(id)"),
+                         (T("List of Facilities"), "list(name)"),
+                        ],
+                "defaults": {"rows": "location_id$L2",
+                             "cols": None,
+                             "fact": "count(id)",
+                             "totals": True,
+                             },
+                }
+
+            s3db.configure(tablename,
+                           report_options = report_options,
+                           )
+
+    settings.customise_org_facility_resource = customise_org_facility_resource
+
+    # -------------------------------------------------------------------------
+    def customise_org_facility_controller(**attr):
+
+        s3 = current.response.s3
+
+        auth = current.auth
+        is_org_group_admin = auth.s3_has_role("ORG_GROUP_ADMIN")
+
+        # Load model for default CRUD strings
+        current.s3db.table("org_facility")
+
+        # Custom prep
+        standard_prep = s3.prep
+        def prep(r):
+            # Call standard prep
+            result = standard_prep(r) if callable(standard_prep) else True
+
+            s3db = current.s3db
+
+            resource = r.resource
+            table = resource.table
+            record = r.record
+
+            if not record:
+                # Filter out defunct facilities
+                resource.add_filter(FS("obsolete") == False)
+
+                # Open read-view first, even if permitted to edit
+                settings.ui.open_read_first = True
+
+                if is_org_group_admin and r.method == "report":
+
+                    s3.crud_strings.org_facility.title_report = T("Facilities Statistics")
+
+                else:
+
+                    # Filter by public-tag
+                    get_vars = r.get_vars
+                    if is_org_group_admin:
+                        pending = get_vars.get("$$pending")
+                        review = get_vars.get("$$review")
+                    else:
+                        pending = review = False
+
+                    if pending == "1":
+                        resource.add_filter(FS("public.value") == "N")
+                        s3.crud_strings.org_facility.title_list = T("Unapproved Test Stations")
+
+                    elif review == "1":
+                        resource.add_filter(FS("status.value") == "REVIEW")
+                        s3.crud_strings.org_facility.title_list = T("Test Stations to review")
+
+                    else:
+                        resource.add_filter(FS("public.value") == "Y")
+                        s3.crud_strings.org_facility.title_list = T("Find Test Station")
+
+                        # No Side Menu
+                        current.menu.options = None
+
+                        # Filter list by project code
+                        # - re-use last used $$code filter of this session
+                        # - default to original subset for consistency in bookmarks/links
+                        session_s3 = current.session.s3
+                        default_filter = session_s3.get("rlp_facility_filter", "TESTS-SCHOOLS")
+                        code = r.get_vars.get("$$code", default_filter)
+                        if code:
+                            session_s3.rlp_facility_filter = code
+                            query = FS("~.organisation_id$project.code") == code
+                            resource.add_filter(query)
+                            if code == "TESTS-SCHOOLS":
+                                s3.crud_strings.org_facility.title_list = T("Test Stations for School and Child Care Staff")
+                            elif code == "TESTS-PUBLIC":
+                                s3.crud_strings.org_facility.title_list = T("Test Stations for Everybody")
+
+            elif r.representation == "plain":
+                # Bypass REST method, return map popup directly
+                from .helpers import facility_map_popup
+                result = {"bypass": True,
+                          "output": facility_map_popup(record),
+                          }
+            else:
+                # Single facility read view
+
+                # No facility details editable here except comments
+                for fn in table.fields:
+                    if fn != "comments":
+                        table[fn].writable = False
+
+                # No side menu except for OrgGroupAdmin
+                if not is_org_group_admin:
+                    current.menu.options = None
+
+                if not is_org_group_admin and \
+                   not auth.s3_has_role("ORG_ADMIN", for_pe=record.pe_id):
+
+                    s3.hide_last_update = True
+
+                    field = table.obsolete
+                    field.readable = field.writable = False
+
+                    field = table.organisation_id
+                    field.represent = s3db.org_OrganisationRepresent(show_link=False)
+
+            resource.configure(summary = ({"name": "table",
+                                           "label": "Table",
+                                           "widgets": [{"method": "datatable"}]
+                                           },
+                                          {"name": "map",
+                                           "label": "Map",
+                                           "widgets": [{"method": "map", "ajax_init": True}],
+                                           },
+                                          ),
+                               insertable = False,
+                               deletable = False,
+                               )
+
+            return result
+        s3.prep = prep
+
+        standard_postp = s3.postp
+        def postp(r, output):
+
+            if r.representation == "plain" and r.record:
+                # Prevent standard postp rewriting output
+                pass
+            elif callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if not is_org_group_admin and \
+               r.record and isinstance(output, dict):
+                # Override list-button to go to summary
+                buttons = output.get("buttons")
+                if isinstance(buttons, dict) and "list_btn" in buttons:
+                    from s3 import S3CRUD
+                    summary = r.url(method="summary", id="", component="")
+                    buttons["list_btn"] = S3CRUD.crud_button(label = T("List Facilities"),
+                                                             _href = summary,
+                                                             )
+            return output
+        s3.postp = postp
+
+        # No rheader
+        attr["rheader"] = None
+
+        return attr
+
+    settings.customise_org_facility_controller = customise_org_facility_controller
 
     # -------------------------------------------------------------------------
     def customise_project_project_resource(r, tablename):
@@ -2195,16 +2887,8 @@ def config(settings):
             resource = r.resource
 
             # Configure binary tags
-            binary_tag_opts = {"Y": T("Yes"), "N": T("No")}
-            for cname in ("apply", "stats"):
-                component = resource.components.get(cname)
-                table = component.table
-                field = table.value
-                field.default = "N"
-                field.requires = IS_IN_SET(binary_tag_opts,
-                                        zero = None,
-                                        )
-                field.represent = lambda v, row=None: binary_tag_opts.get(v, "-")
+            from .helpers import configure_binary_tags
+            configure_binary_tags(resource, ("apply", "stats"))
 
             if r.component_name == "organisation":
 
@@ -2277,6 +2961,7 @@ def config(settings):
 
         table = s3db.inv_recv
 
+        # Custom label for req_ref
         from .requests import ShipmentCodeRepresent
         field = table.req_ref
         field.label = T("Order No.")
@@ -2286,12 +2971,41 @@ def config(settings):
         #field = table.send_ref
         #field.represent = lambda v, row=None: B(v if v else "-")
 
+        # Don't show type in site representation
+        field = table.site_id
+        field.represent = s3db.org_SiteRepresent(show_link = True,
+                                                 show_type = False,
+                                                 )
+
+        # Custom label for from_site_id, don't show link or type
+        field = table.from_site_id
+        field.label = T("Distribution Center")
+        field.readable = True
+        field.writable = False
+        field.represent = s3db.org_SiteRepresent(show_link = False,
+                                                 show_type = False,
+                                                 )
+
+        # Color-coded status representation
+        from s3 import S3PriorityRepresent
+        field = table.status
+        status_opts = s3db.inv_ship_status
+        status_labels = s3db.inv_shipment_status_labels
+        field.represent = S3PriorityRepresent(status_labels,
+                                              {status_opts["IN_PROCESS"]: "lightblue",
+                                               status_opts["RECEIVED"]: "green",
+                                               status_opts["SENT"]: "amber",
+                                               status_opts["CANCEL"]: "black",
+                                               status_opts["RETURNING"]: "red",
+                                               }).represent
+
         if r.tablename == "inv_recv" and not r.component:
             if r.interactive:
                 from s3 import S3SQLCustomForm
                 crud_fields = ["req_ref",
                                #"send_ref",
                                "site_id",
+                               "from_site_id",
                                "status",
                                "recipient_id",
                                "date",
@@ -2304,6 +3018,7 @@ def config(settings):
             list_fields = ["req_ref",
                            #"send_ref",
                            "site_id",
+                           "from_site_id",
                            "date",
                            "status",
                            ]
@@ -2340,7 +3055,6 @@ def config(settings):
                 # Hide unused fields
                 unused = ("type",
                           "organisation_id",
-                          "from_site_id",
                           "purchase_ref",
                           "recv_ref",
                           )
@@ -2405,15 +3119,57 @@ def config(settings):
     # -------------------------------------------------------------------------
     def customise_inv_send_resource(r, tablename):
 
+        db = current.db
         s3db = current.s3db
 
         table = s3db.inv_send
 
         from .requests import ShipmentCodeRepresent
 
+        # Custom representation of req_ref
         field = table.req_ref
         field.label = T("Order No.")
-        field.represent = ShipmentCodeRepresent("req_req", "req_ref")
+        if r.representation == "wws":
+            field.represent = lambda v, row=None: v if v else "-"
+        else:
+            field.represent = ShipmentCodeRepresent("req_req", "req_ref")
+
+        # Sending site is required, must not be obsolete, +custom label
+        field = table.site_id
+        field.label = T("Distribution Center")
+        field.requires = IS_ONE_OF(db, "org_site.site_id",
+                                   field.represent,
+                                   instance_types = ("inv_warehouse",),
+                                   not_filterby = "obsolete",
+                                   not_filter_opts = (True,),
+                                   )
+        field.represent = s3db.org_SiteRepresent(show_link = False,
+                                                 show_type = False,
+                                                 )
+
+        # Recipient site is required, must be org_facility
+        field = table.to_site_id
+        field.requires = IS_ONE_OF(db, "org_site.site_id",
+                                   field.represent,
+                                   instance_types = ("org_facility",),
+                                   sort = True,
+                                   )
+        field.represent = s3db.org_SiteRepresent(show_link = True,
+                                                 show_type = False,
+                                                 )
+
+        # Color-coded status representation
+        from s3 import S3PriorityRepresent
+        field = table.status
+        status_opts = s3db.inv_ship_status
+        status_labels = s3db.inv_shipment_status_labels
+        field.represent = S3PriorityRepresent(status_labels,
+                                              {status_opts["IN_PROCESS"]: "lightblue",
+                                               status_opts["RECEIVED"]: "green",
+                                               status_opts["SENT"]: "amber",
+                                               status_opts["CANCEL"]: "black",
+                                               status_opts["RETURNING"]: "red",
+                                               }).represent
 
         # We don't use send_ref
         field = table.send_ref
@@ -2426,6 +3182,7 @@ def config(settings):
                        "req_ref",
                        #"send_ref",
                        "date",
+                       "site_id",
                        "to_site_id",
                        "status",
                        ]
@@ -2436,6 +3193,34 @@ def config(settings):
 
         # Do not check for site_id (unused)
         s3db.clear_config("inv_send", "onvalidation")
+
+        if r.method == "report":
+            axes = [(T("Orderer"), "to_site_id"),
+                    "to_site_id$location_id$L3",
+                    "to_site_id$location_id$L2",
+                    "to_site_id$location_id$L1",
+                    (T("Shipment Items"), "track_item.item_id"),
+                    (T("Distribution Center"), "site_id"),
+                    "status",
+                    ]
+
+            report_options = {
+                "rows": axes,
+                "cols": axes,
+                "fact": [(T("Number of Shipments"), "count(id)"),
+                         (T("Number of Items"), "count(track_item.id)"),
+                         (T("Sent Quantity"), "sum(track_item.quantity)"),
+                        ],
+                "defaults": {"rows": "track_item.item_id",
+                             "cols": "status",
+                             "fact": "sum(track_item.quantity)",
+                             "totals": True,
+                             },
+                }
+
+            s3db.configure(tablename,
+                           report_options = report_options,
+                           )
 
     settings.customise_inv_send_resource = customise_inv_send_resource
 
@@ -2458,13 +3243,16 @@ def config(settings):
             resource = r.resource
             table = resource.table
 
+            record = r.record
             component = r.component
 
+            if r.method == "report":
+                s3.crud_strings[resource.tablename].title_report = T("Shipments Statistics")
+
             if not component:
-                record = r.record
 
                 # Hide unused fields
-                unused = ("site_id",
+                unused = (#"site_id",
                           "organisation_id",
                           "type",
                           "driver_name",
@@ -2562,9 +3350,37 @@ def config(settings):
                                     list_fields = list_fields,
                                     )
 
+            if r.interactive and not record and auth.s3_has_role("SUPPLY_COORDINATOR"):
+                # Configure WWS export format
+                export_formats = list(settings.get_ui_export_formats())
+                export_formats.append(("wws", "fa fa-shopping-cart", T("CoronaWWS")))
+                s3.formats["wws"] = r.url(method="", vars={"mcomponents": "track_item"})
+                settings.ui.export_formats = export_formats
 
             return result
         s3.prep = prep
+
+        standard_postp = s3.postp
+        def postp(r, output):
+
+            # Call standard postp if on component tab
+            if r.component and callable(standard_postp):
+                output = standard_postp(r, output)
+
+            if r.representation == "wws":
+                # Deliver as attachment rather than as page content
+                from gluon.contenttype import contenttype
+
+                now = current.request.utcnow.strftime("%Y%m%d%H%M%S")
+                filename = "ship%s.wws" % now
+                disposition = "attachment; filename=\"%s\"" % filename
+
+                response = current.response
+                response.headers["Content-Type"] = contenttype(".xml")
+                response.headers["Content-disposition"] = disposition
+
+            return output
+        s3.postp = postp
 
         from .rheaders import rlpptm_inv_rheader
         attr["rheader"] = rlpptm_inv_rheader
@@ -2705,6 +3521,10 @@ def config(settings):
                                       show_link = True,
                                       )
 
+        # Custom label for Pack
+        field = table.item_pack_id
+        field.label = T("Order Unit")
+
         # Custom list fields
         resource = r.resource
         if resource.tablename == "supply_item":
@@ -2749,6 +3569,102 @@ def config(settings):
     settings.customise_inv_track_item_resource = customise_inv_track_item_resource
 
     # -------------------------------------------------------------------------
+    def customise_inv_warehouse_resource(r, tablename):
+
+        T = current.T
+
+        s3db = current.s3db
+
+        table = s3db.inv_warehouse
+
+        # Remove Add-links for organisation and warehouse type
+        field = table.organisation_id
+        field.comment = None
+        field = table.warehouse_type_id
+        field.comment = None
+
+        # Custom label, represent and tooltip for obsolete-flag
+        field = table.obsolete
+        field.readable = field.writable = True
+        field.label = T("Defunct")
+        field.represent = lambda v, row=None: ICON("remove") if v else ""
+        field.comment = DIV(_class="tooltip",
+                            _title="%s|%s" % (T("Defunct"),
+                                              T("Please mark this field when the facility is no longer in operation"),
+                                              ),
+                            )
+
+        if r.interactive:
+
+            # Configure location selector and geocoder
+            from s3 import S3LocationSelector
+            field = table.location_id
+            field.widget = S3LocationSelector(levels = ("L1", "L2", "L3", "L4"),
+                                              required_levels = ("L1", "L2", "L3"),
+                                              show_address = True,
+                                              show_postcode = True,
+                                              show_map = True,
+                                              )
+            current.response.s3.scripts.append("/%s/static/themes/RLP/js/geocoderPlugin.js" % r.application)
+
+            # Custom CRUD-Form
+            from s3 import S3SQLCustomForm
+            crud_fields = ["organisation_id",
+                           "name",
+                           "code",
+                           "warehouse_type_id",
+                           "location_id",
+                           "email",
+                           "phone1",
+                           "phone2",
+                           "comments",
+                           "obsolete",
+                           ]
+
+            s3db.configure("inv_warehouse",
+                           crud_form = S3SQLCustomForm(*crud_fields),
+                           )
+
+        # Custom list fields
+        list_fields = ["organisation_id",
+                       "name",
+                       "code",
+                       "warehouse_type_id",
+                       "location_id",
+                       "email",
+                       "phone1",
+                       "obsolete",
+                       ]
+        s3db.configure("inv_warehouse",
+                       list_fields = list_fields,
+                       deletable = False,
+                       )
+
+    settings.customise_inv_warehouse_resource = customise_inv_warehouse_resource
+
+    # -------------------------------------------------------------------------
+    def customise_inv_warehouse_controller(**attr):
+
+        s3 = current.response.s3
+
+        #standard_postp = s3.postp
+        #def postp(r, output):
+        #    if callable(standard_postp):
+        #        output = standard_postp(r, output)
+        #    return output
+        #s3.postp = postp
+
+        # Override standard postp
+        s3.postp = None
+
+        from .rheaders import rlpptm_inv_rheader
+        attr["rheader"] = rlpptm_inv_rheader
+
+        return attr
+
+    settings.customise_inv_warehouse_controller = customise_inv_warehouse_controller
+
+    # -------------------------------------------------------------------------
     def customise_req_req_resource(r, tablename):
 
         db = current.db
@@ -2762,12 +3678,31 @@ def config(settings):
         field.label = T("Order No.")
         #field.represent = lambda v, row=None: v if v else "-"
 
+        # Don't show facility type
+        field = table.site_id
+        field.represent = s3db.org_SiteRepresent(show_link = True,
+                                                 show_type = False,
+                                                 )
+
         if auth.s3_has_role("SUPPLY_COORDINATOR"):
+            # Custom method to register a shipment
             from .requests import RegisterShipment
             s3db.set_method("req", "req",
                             method = "ship",
                             action = RegisterShipment,
                             )
+            # Show contact details for requester
+            from .helpers import ContactRepresent
+            field = table.requester_id
+            field.represent = ContactRepresent(show_email = True,
+                                               show_phone = True,
+                                               show_link = False,
+                                               )
+        else:
+            # Simpler represent of requester, no link
+            field = table.requester_id
+            field.represent = s3db.pr_PersonRepresent(show_link = False,
+                                                      )
 
         # Filter out obsolete items
         ritable = s3db.req_req_item
@@ -2784,6 +3719,38 @@ def config(settings):
         field.requires = IS_FLOAT_AMOUNT(minimum = 1.0,
                                          error_message = T("Minimum quantity is %(min)s"),
                                          )
+
+        # Custom label for Pack
+        field = ritable.item_pack_id
+        field.label = T("Order Unit")
+
+        if r.method == "report":
+            axes = [(T("Orderer"), "site_id"),
+                    "site_id$location_id$L3",
+                    "site_id$location_id$L2",
+                    "site_id$location_id$L1",
+                    (T("Requested Items"), "req_item.item_id"),
+                    "transit_status",
+                    "fulfil_status",
+                    ]
+
+            report_options = {
+                "rows": axes,
+                "cols": axes,
+                "fact": [(T("Number of Requests"), "count(id)"),
+                         (T("Number of Items"), "count(req_item.id)"),
+                         (T("Requested Quantity"), "sum(req_item.quantity)"),
+                        ],
+                "defaults": {"rows": "site_id$location_id$L2",
+                             "cols": None,
+                             "fact": "count(id)",
+                             "totals": True,
+                             },
+                }
+
+            s3db.configure(tablename,
+                           report_options = report_options,
+                           )
 
     settings.customise_req_req_resource = customise_req_req_resource
 
@@ -2802,6 +3769,8 @@ def config(settings):
         standard_prep = s3.prep
         def prep(r):
 
+            r.get_vars["type"] = "1"
+
             is_supply_coordinator = has_role("SUPPLY_COORDINATOR")
 
             # User must be either SUPPLY_COORDINATOR or ORG_ADMIN of a
@@ -2819,6 +3788,11 @@ def config(settings):
 
             resource = r.resource
             table = resource.table
+
+            # Date is only writable for ADMIN
+            field = table.date
+            field.default = current.request.utcnow
+            field.writable = has_role("AMDIN")
 
             record = r.record
             if record:
@@ -2840,7 +3814,6 @@ def config(settings):
                                               editable = False,
                                               deletable = False,
                                               )
-
             if not r.component:
                 if r.interactive:
                     # Hide priority, date_required and date_recv
@@ -2854,7 +3827,8 @@ def config(settings):
                     if not is_supply_coordinator:
                         # Limit to sites of managed requester organisations
                         stable = s3db.org_site
-                        dbset = db(stable.organisation_id.belongs(requester_orgs))
+                        dbset = db((stable.organisation_id.belongs(requester_orgs)) & \
+                                   (stable.obsolete == False))
                         field = table.site_id
                         field.requires = IS_ONE_OF(dbset, "org_site.site_id",
                                                    field.represent,
@@ -2901,19 +3875,11 @@ def config(settings):
                                          req_req_item_create_onaccept,
                                          method = "create",
                                          )
-
-            if r.interactive and not record and has_role("SUPPLY_COORDINATOR"):
-                # Configure WWS export format
-                export_formats = list(settings.get_ui_export_formats())
-                export_formats.append(("wws", "fa fa-shopping-cart", T("CoronaWWS")))
-                s3.formats["wws"] = r.url(method="")
-                settings.ui.export_formats = export_formats
-
             return result
         s3.prep = prep
 
         standard_postp = s3.postp
-        def custom_postp(r, output):
+        def postp(r, output):
 
             # Call standard postp if on component tab
             if r.component and callable(standard_postp):
@@ -2925,7 +3891,8 @@ def config(settings):
             from s3db.req import REQ_STATUS_COMPLETE, REQ_STATUS_CANCEL
             request_complete = (REQ_STATUS_COMPLETE, REQ_STATUS_CANCEL)
 
-            stable = s3db.inv_send
+            istable = s3db.inv_send
+
             from s3db.inv import SHIP_STATUS_IN_PROCESS, SHIP_STATUS_SENT
             shipment_in_process = (SHIP_STATUS_IN_PROCESS, SHIP_STATUS_SENT)
 
@@ -2933,30 +3900,48 @@ def config(settings):
             if r.interactive and isinstance(output, dict):
 
                 # Add register-shipment action button(s)
+                ritable = s3db.req_req_item
 
                 ship_btn_label = s3_str(T("Register Shipment"))
                 inject_script = False
                 if record:
                     # Single record view
                     if not r.component and has_role("SUPPLY_COORDINATOR"):
-                        if record.fulfil_status not in request_complete:
-                            query = (stable.req_ref == record.req_ref) & \
-                                    (stable.status.belongs(shipment_in_process)) & \
-                                    (stable.deleted == False)
-                            shipment = db(query).select(stable.id, limitby=(0, 1)).first()
+                        query = (ritable.req_id == record.id) & \
+                                (ritable.deleted == False)
+                        item = db(query).select(ritable.id, limitby=(0, 1)).first()
+                        if item and record.fulfil_status not in request_complete:
+                            query = (istable.req_ref == record.req_ref) & \
+                                    (istable.status.belongs(shipment_in_process)) & \
+                                    (istable.deleted == False)
+                            shipment = db(query).select(istable.id, limitby=(0, 1)).first()
                         else:
                             shipment = None
-                        if not shipment:
+                        if item and not shipment:
+                            from .requests import is_active
+                            site_active = is_active(record.site_id)
+                        else:
+                            site_active = True
+                        if item and not shipment and site_active:
                             ship_btn = A(T("Register Shipment"),
                                          _class = "action-btn ship-btn",
                                          _db_id = str(record.id),
                                          )
                             inject_script = True
                         else:
+                            warn = None
+                            if not item:
+                                warn = reason = T("Requests contains no items")
+                            elif not site_active:
+                                warn = reason = T("Requesting site no longer active")
+                            else:
+                                reason = T("Shipment already in process")
+                            if warn:
+                                current.response.warning = warn
                             ship_btn = A(T("Register Shipment"),
                                          _class = "action-btn",
                                          _disabled = "disabled",
-                                         _title = T("Shipment already in process"),
+                                         _title = reason,
                                          )
                         if "buttons" not in output:
                             buttons = output["buttons"] = {}
@@ -2969,6 +3954,7 @@ def config(settings):
 
                 elif not r.component and not r.method:
                     # Datatable
+                    stable = s3db.org_site
 
                     # Default action buttons (except delete)
                     from s3 import S3CRUD
@@ -2976,14 +3962,20 @@ def config(settings):
 
                     if has_role("SUPPLY_COORDINATOR"):
                         # Can only register shipments for unfulfilled requests with
-                        # no shipment currently in process or in transit
-                        left = stable.on((stable.req_ref == table.req_ref) & \
-                                         (stable.status.belongs(shipment_in_process)) & \
-                                         (stable.deleted == False))
+                        # no shipment currently in process or in transit, and the
+                        # requesting site still active, and at least one requested item
+                        left = istable.on((istable.req_ref == table.req_ref) & \
+                                          (istable.status.belongs(shipment_in_process)) & \
+                                          (istable.deleted == False))
+                        join = [stable.on((stable.site_id == table.site_id) & \
+                                          (stable.obsolete == False)),
+                                ritable.on((ritable.req_id == table.id) & \
+                                           (ritable.deleted == False)),
+                                ]
                         query = (table.fulfil_status != REQ_STATUS_COMPLETE) & \
                                 (table.fulfil_status != REQ_STATUS_CANCEL) & \
-                                (stable.id == None)
-                        rows = db(query).select(table.id, groupby=table.id, left = left)
+                                (istable.id == None)
+                        rows = db(query).select(table.id, groupby=table.id, join=join, left=left)
                         restrict = [str(row.id) for row in rows]
 
                         # Register-shipment button
@@ -2997,7 +3989,7 @@ def config(settings):
                         # is currently disabled
                         disabled = {"label": ship_btn_label,
                                     "_class": "action-btn",
-                                    "_title": s3_str(T("Shipment already in process")),
+                                    "_title": s3_str(T("Shipment already in process, or not possible")),
                                     "_disabled": "disabled",
                                     "exclude": restrict,
                                     }
@@ -3009,10 +4001,10 @@ def config(settings):
                     if auth.s3_has_permission("delete", table):
                         # Requests can only be deleted while no shipment for them
                         # has been registered yet:
-                        left = stable.on((stable.req_ref == table.req_ref) & \
-                                         (stable.deleted == False))
+                        left = istable.on((istable.req_ref == table.req_ref) & \
+                                          (istable.deleted == False))
                         query = auth.s3_accessible_query("delete", table) & \
-                                (stable.id == None)
+                                (istable.id == None)
                         rows = db(query).select(table.id, left=left)
 
                         # Delete-button
@@ -3035,20 +4027,8 @@ def config(settings):
                     if script not in s3.scripts:
                         s3.scripts.append(script)
 
-            elif r.representation == "wws":
-                # Deliver as attachment rather than as page content
-                from gluon.contenttype import contenttype
-
-                now = current.request.utcnow.strftime("%Y%m%d%H%M%S")
-                filename = "req%s.wws" % now
-                disposition = "attachment; filename=\"%s\"" % filename
-
-                response = current.response
-                response.headers["Content-Type"] = contenttype(".xml")
-                response.headers["Content-disposition"] = disposition
-
             return output
-        s3.postp = custom_postp
+        s3.postp = postp
 
         from .rheaders import rlpptm_req_rheader
         attr["rheader"] = rlpptm_req_rheader
@@ -3153,6 +4133,10 @@ def config(settings):
         field = table.item_id
         field.widget = None
 
+        # Custom label for Pack
+        field = table.item_pack_id
+        field.label = T("Order Unit")
+
         s3db.add_custom_callback("req_req_item",
                                  "onaccept",
                                  req_req_item_create_onaccept,
@@ -3195,7 +4179,6 @@ def config(settings):
         field = table.obsolete
         field.label = T("Not orderable")
         field.readable = field.writable = True
-        from s3 import ICON
         field.represent = lambda v, row=None: ICON("remove") if v else ""
 
         # Filter widgets

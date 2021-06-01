@@ -76,7 +76,8 @@ class FinExpensesModel(S3Model):
                           s3_comments(),
                           *s3_meta_fields(),
                           on_define = lambda table: \
-                            [table.created_by.set_attributes(represent = s3_auth_user_represent_name),
+                            [table.created_by.set_attributes(represent = self.auth_UserRepresent(show_email = False,
+                                                                                                 show_link = False)),
                              #table.created_on.set_attributes(represent = S3DateTime.datetime_represent),
                              ]
                           )
@@ -1359,7 +1360,7 @@ class FinVoucherModel(S3Model):
                                             application_name = application,
                                             start_time = start,
                                             stop_time = None,
-                                            timeout = 600,
+                                            timeout = 1800,
                                             repeats = 1,
                                             )
                 if task:
@@ -3123,7 +3124,7 @@ class fin_VoucherProgram(object):
                     )
                 ptable = s3db.fin_voucher_program
                 program.update_record(
-                    credit = program.credit + transaction["credit"],
+                    credit = ptable.credit + transaction["credit"],
                     modified_on = ptable.modified_on,
                     modified_by = ptable.modified_by,
                     )
@@ -3173,7 +3174,7 @@ class fin_VoucherProgram(object):
                     )
                 ptable = s3db.fin_voucher_program
                 program.update_record(
-                    credit = program.credit + transaction["credit"],
+                    credit = ptable.credit + transaction["credit"],
                     modified_on = ptable.modified_on,
                     modified_by = ptable.modified_by,
                     )
@@ -3268,8 +3269,8 @@ class fin_VoucherProgram(object):
                     )
                 ptable = s3db.fin_voucher_program
                 program.update_record(
-                    credit = program.credit + transaction["credit"],
-                    compensation = program.compensation + transaction["compensation"],
+                    credit = ptable.credit + transaction["credit"],
+                    compensation = ptable.compensation + transaction["compensation"],
                     modified_on = ptable.modified_on,
                     modified_by = ptable.modified_by,
                     )
@@ -3393,8 +3394,8 @@ class fin_VoucherProgram(object):
                     # Update the program balance
                     ptable = s3db.fin_voucher_program
                     program.update_record(
-                        credit = program.credit + transaction["credit"],
-                        compensation = program.compensation + transaction["compensation"],
+                        credit = ptable.credit + transaction["credit"],
+                        compensation = ptable.compensation + transaction["compensation"],
                         modified_on = ptable.modified_on,
                         modified_by = ptable.modified_by,
                         )
@@ -3499,7 +3500,7 @@ class fin_VoucherProgram(object):
                     )
                 ptable = s3db.fin_voucher_program
                 program.update_record(
-                    compensation = program.compensation + transaction["compensation"],
+                    compensation = ptable.compensation + transaction["compensation"],
                     modified_on = ptable.modified_on,
                     modified_by = ptable.modified_by,
                     )
@@ -3611,7 +3612,8 @@ class fin_VoucherProgram(object):
         earliest = row.date + datetime.timedelta(days=1) if row else None
 
         if earliest and configure:
-            configure.default = earliest
+            default = configure.default
+            configure.default = max(earliest, default) if default else earliest
             configure.requires = IS_EMPTY_OR(IS_UTC_DATE(minimum=earliest))
             configure.widget = S3CalendarWidget(minimum=earliest)
 
@@ -3988,6 +3990,12 @@ class fin_VoucherBilling(object):
                               modified_by = btable.modified_by,
                               modified_on = btable.modified_on,
                               )
+
+        # If no claims have been generated, conclude the billing
+        # right away (as there will be no later trigger)
+        if total_claims == 0:
+            self.check_complete(claims_complete=True)
+
         return total_claims
 
     # -------------------------------------------------------------------------
@@ -4269,10 +4277,12 @@ class fin_VoucherBilling(object):
         return total
 
     # -------------------------------------------------------------------------
-    def check_complete(self):
+    def check_complete(self, claims_complete=False):
         """
             Check whether this billing process is complete (+update status
             if so)
+
+            @param claims_complete: confirm that claim generation is complete
 
             @returns: True|False
         """
@@ -4291,8 +4301,8 @@ class fin_VoucherBilling(object):
             query &= (ctable.status != "PAID")
             pending = db(query).select(ctable.id, limitby=(0, 1)).first()
         else:
-            # No claims generated yet
-            pending = True
+            # No claims generated yet?
+            pending = not claims_complete
 
         if pending:
             return False

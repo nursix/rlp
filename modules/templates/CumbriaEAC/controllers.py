@@ -11,10 +11,15 @@ class index(S3CustomController):
 
     def __call__(self):
 
+        auth = current.auth
+
+        if auth.s3_has_role("POLICE", include_admin=False):
+            # Police don't manage Shelters, they are interested in Clients
+            redirect(URL(c="pr", f="person", args="summary"))
+
         output = {}
 
         T = current.T
-        auth = current.auth
         db = current.db
         s3db = current.s3db
         s3 = current.response.s3
@@ -76,26 +81,40 @@ class index(S3CustomController):
             shelters = db(query).select(stable.id,
                                         stable.name,
                                         )
-            facility_list = [(row.id, row.name) for row in shelters]
-            facility_list = sorted(facility_list, key=lambda fac: fac[1])
-            facility_opts = [OPTION(fac[1], _value=fac[0])
-                             for fac in facility_list]
-
-            manage_facility_box = DIV(H3(T("Manage your Shelter")),
-                                      SELECT(_id = "manage-facility-select",
-                                             *facility_opts
-                                             ),
-                                      A(T("Go"),
-                                        _href = URL(c="cr", f="shelter",
-                                                    args = [facility_list[0][0], "manage"],
-                                                    ),
-                                        _id = "manage-facility-btn",
-                                        _class = "action-btn"
-                                        ),
-                                      _id = "manage-facility-box",
-                                      _class = "menu-box",
-                                      )
+            if len(shelters) > 0:
+                facility_list = [(row.id, row.name) for row in shelters]
+                facility_list = sorted(facility_list, key=lambda fac: fac[1])
+                facility_opts = [OPTION(fac[1], _value=fac[0])
+                                 for fac in facility_list]
+                shelter_id = facility_list[0][0]
+                manage_facility_box = DIV(H3(T("Manage your Shelter")),
+                                          SELECT(_id = "manage-facility-select",
+                                                 *facility_opts
+                                                 ),
+                                          A(T("Go"),
+                                            _href = URL(c="cr", f="shelter",
+                                                        args = [shelter_id, "manage"],
+                                                        ),
+                                            _id = "manage-facility-btn",
+                                            _class = "action-btn"
+                                            ),
+                                          _id = "manage-facility-box",
+                                          _class = "menu-box row",
+                                          )
+            else:
+                manage_facility_box = DIV(T("No Open Shelters"),
+                                          _class = "menu-box row",
+                                          )
             output["manage_facility_box"] = manage_facility_box
+            output["find_shelter"] = DIV(A(T("Find a Shelter to Open"),
+                                           _href = URL(c="cr", f="shelter",
+                                                       args = ["summary"],
+                                                       vars = {"~.status__belongs": "1,3,4,5,6",
+                                                               },
+                                                       )
+                                           ),
+                                         _class = "menu-box row",
+                                         )
 
             s3.jquery_ready.append('''$('#manage-facility-select').change(function(){
  $('#manage-facility-btn').attr('href',S3.Ap.concat('/cr/shelter/',$('#manage-facility-select').val(),'/manage'))})

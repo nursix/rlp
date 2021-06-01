@@ -671,6 +671,9 @@ class S3AddPersonWidget(FormWidget):
                 raise RuntimeError("AddPersonWidget person field <-> tag name collision")
 
         self.fields = fields
+        editable_fields = settings.get_pr_editable_fields()
+        editable_fields = [fname for fname in editable_fields if fname in fields]
+        self.editable_fields = editable_fields
 
         # Extract existing values
         if value:
@@ -715,6 +718,10 @@ class S3AddPersonWidget(FormWidget):
             widget_options["separateNameFields"] = True
             if trigger:
                 widget_options["trigger"] = trigger
+
+        # Editable Fields
+        if editable_fields:
+            widget_options["editableFields"] = editable_fields
 
         # Tags
         if tags:
@@ -930,12 +937,21 @@ class S3AddPersonWidget(FormWidget):
         title_id = "%s_title" % widget_id
         label = LABEL(label, _for=title_id)
 
-        widget = DIV(A(ICON("edit"),
-                       _class = "edit-action",
-                       _title = T("Edit Entry"),
+        if len(self.editable_fields):
+            edit_btn = A(ICON("edit"),
+                         _class = "edit-action",
+                         _title = T("Edit Entry"),
+                         )
+        else:
+            edit_btn = ""
+
+        widget = DIV(edit_btn,
+                     A(ICON("eraser"),
+                       _class = "clear-action",
+                       _title = T("Clear Entry"),
                        ),
-                     A(ICON("remove"),
-                       _class = "cancel-action",
+                     A(ICON("undo"),
+                       _class = "undo-action",
                        _title = T("Revert Entry"),
                        ),
                      _class = "add_person_edit_bar hide",
@@ -956,11 +972,12 @@ class S3AddPersonWidget(FormWidget):
         rows.append(row)
 
         # Input rows
+        fields_get = self.fields.get
         get_label = self.get_label
         get_widget = self.get_widget
         for fname in formfields:
 
-            field = self.fields.get(fname)
+            field = fields_get(fname)
             if not field:
                 continue # Field is disabled
 
@@ -985,13 +1002,14 @@ class S3AddPersonWidget(FormWidget):
                                 )
 
                 if fname == "organisation_id":
-                    comment= None
-                    #comment = S3PopupLink(c = "org",
-                    #                      f = "organisation",
-                    #                      label = ADD_ORGANIZATION,
-                    #                      title = ADD_ORGANIZATION,
-                    #                      tooltip = tooltip,
-                    #                      )
+                    from s3layouts import S3PopupLink
+                    comment = S3PopupLink(c = "org",
+                                          f = "organisation",
+                                          vars = {"prefix": "hrm",
+                                                  "parent": "human_resource",
+                                                  "child": "organisation_id",
+                                                  },
+                                          )
                 else:
                     comment = None
             else:
@@ -1155,18 +1173,20 @@ class S3AddPersonWidget(FormWidget):
 
         data_get = data.get
 
-        person_id = data_get("id")
-        if person_id:
-            # Existing record selected => return ID as-is
-            return person_id, None
-
-        # Establish the name(s)
-        names = self.get_names(data)
-        if not names:
-            # Treat as empty
-            return None, None
+        record_id = data_get("id")
+        if record_id:
+            # Existing record selected
+            if len(data) == 1:
+                # Not edited => return ID as-is
+                return record_id, None
         else:
-            data.update(names)
+            # Establish the name(s)
+            names = self.get_names(data)
+            if not names:
+                # Treat as empty
+                return None, None
+            else:
+                data.update(names)
 
         # Validate phone numbers
         mobile = data_get("mobile_phone")
@@ -1174,29 +1194,33 @@ class S3AddPersonWidget(FormWidget):
             validator = IS_PHONE_NUMBER_SINGLE(international=True)
             mobile, error = validator(mobile)
             if error:
-                return (None, error)
+                return (record_id, error)
 
         home_phone = data_get("home_phone")
         if home_phone:
             validator = IS_PHONE_NUMBER_MULTI()
             home_phone, error = validator(home_phone)
             if error:
-                return (None, error)
+                return (record_id, error)
 
         # Validate date of birth
         dob = data_get("date_of_birth")
         if not dob and \
            self.fields.get("date_of_birth") and \
            self.required.get("date_of_birth"):
-            return (None, current.T("Date of Birth is Required"))
+            return (record_id, current.T("Date of Birth is Required"))
 
         # Validate the email
         error = self.validate_email(data_get("email"))[1]
         if error:
-            return (None, error)
+            return (record_id, error)
 
-        # Try to create the person records (and related records)
-        return self.create_person(data)
+        if record_id:
+            # Try to update the person's related records
+            return self.update_person(data)
+        else:
+            # Try to create the person records (and related records)
+            return self.create_person(data)
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1388,12 +1412,14 @@ class S3AddPersonWidget(FormWidget):
         if not person_id:
             return (None, T("Could not add person record"))
 
+        data_get = data.get
+
         hrm = self.hrm
         if hrm:
             # Create the HRM record
             htable = s3db.hrm_human_resource
             human_resource_id = htable.insert(person_id = person_id,
-                                              organisation_id = data.get("organisation_id"),
+                                              organisation_id = data_get("organisation_id"),
                                               )
 
         # Update the super-entities
@@ -1417,7 +1443,7 @@ class S3AddPersonWidget(FormWidget):
                     "mobile_phone": "SMS",
                     }
         for fname, contact_method in contacts.items():
-            value = data.get(fname)
+            value = data_get(fname)
             if value:
                 ctable.insert(pe_id = pe_id,
                               contact_method = contact_method,
@@ -1431,7 +1457,7 @@ class S3AddPersonWidget(FormWidget):
                       "grandfather_name",
                       "year_of_birth",
                       ):
-            value = data.get(fname)
+            value = data_get(fname)
             if value:
                 details[fname] = value
         if details:
@@ -1440,7 +1466,7 @@ class S3AddPersonWidget(FormWidget):
 
         # Add tags as provided
         for _, tag in current.deployment_settings.get_pr_request_tags():
-            value = data.get(tag)
+            value = data_get(tag)
             if value:
                 s3db.pr_person_tag.insert(person_id = person_id,
                                           tag = tag,
@@ -1451,6 +1477,126 @@ class S3AddPersonWidget(FormWidget):
             return human_resource_id, None
         else:
             return person_id, None
+
+    # -------------------------------------------------------------------------
+    def update_person(self, data):
+        """
+            Create/Update records from form data
+
+            @param data - the submitted data
+            @return: tuple (id, error), where "id" is the record ID of the
+                     existing person record
+        """
+
+        db = current.db
+        s3db = current.s3db
+
+        data_get = data.get
+        record_id = data_get("id")
+        hrm = self.hrm
+
+        if hrm:
+            # Read the HR record
+            htable = s3db.hrm_human_resource
+            hr = db(htable.id == record_id).select(htable.id,
+                                                   htable.organisation_id,
+                                                   htable.person_id,
+                                                   limitby = (0, 1)
+                                                   ).first()
+            organisation_id = data_get("organisation_id")
+            if organisation_id != hr.organisation_id:
+                hr.update_record(organisation_id = organisation_id)
+            person_id = hr.person_id
+        else:
+            person_id = record_id
+
+        # Read the Person
+        ptable = s3db.pr_person
+        person = db(ptable.id == person_id).select(ptable.pe_id,
+                                                   limitby = (0, 1)
+                                                   ).first()
+        pe_id = person.pe_id
+
+        # @ToDo: Handle updates to Name/DoB/Gender/pe_label
+
+        # Update ownership & realm
+        current.auth.s3_set_record_owner(ptable, person_id)
+
+        editable_fields = self.editable_fields
+
+        # Add/Update contact information as provided
+        ctable = s3db.pr_contact
+        contacts = {"email": "EMAIL",
+                    "home_phone": "HOME_PHONE",
+                    "mobile_phone": "SMS",
+                    }
+        for fname, contact_method in contacts.items():
+            if fname not in editable_fields:
+                continue
+            value = data_get(fname)
+            query = (ctable.pe_id == pe_id) & \
+                    (ctable.contact_method == contact_method)
+            contact = db(query).select(ctable.id,
+                                       ctable.value,
+                                       limitby = (0, 1)
+                                       ).first()
+            if contact:
+                if value:
+                    if value != contact.value:
+                        contact.update_record(value = value)
+                else:
+                    db(query).delete()
+            elif value:
+                ctable.insert(pe_id = pe_id,
+                              contact_method = contact_method,
+                              value = value,
+                              )
+
+        # Add/Update details as provided
+        details = {}
+        for fname in ("occupation",
+                      "father_name",
+                      "grandfather_name",
+                      "year_of_birth",
+                      ):
+            if fname not in editable_fields:
+                continue
+            details[fname] = data_get(fname)
+        if details:
+            dtable = s3db.pr_person_details
+            drecord = db(dtable.person_id == person_id).select(dtable.id,
+                                                               limitby = (0, 1)
+                                                               ).first()
+            if drecord:
+                drecord.update_record(**details)
+            else:
+                details["person_id"] = person_id
+                dtable.insert(**details)
+
+        # Add/Update tags as provided
+        tags = current.deployment_settings.get_pr_request_tags()
+        if tags:
+            ttable = s3db.pr_person_tag
+            for _, tag in tags:
+                if tag not in editable_fields:
+                    continue
+                value = data_get(tag)
+                query = (ttable.person_id == person_id) & \
+                        (ttable.tag == tag)
+                trecord = db(query).select(ttable.id,
+                                           ttable.value,
+                                           limitby = (0, 1)
+                                           ).first()
+                if trecord:
+                    if value != trecord.value:
+                        trecord.update_record(value = value)
+                elif value:
+                    ttable.insert(person_id = person_id,
+                                  tag = tag,
+                                  value = value,
+                                  )
+
+        return record_id, None
 
 # =============================================================================
 class S3AgeWidget(FormWidget):
@@ -4943,7 +5089,7 @@ class S3LocationSelector(S3Selector):
             - Validation errors cause issues
             - Needs more testing
         * Should support use in an InlineComponent with multiple=True
-        * Should support multiple on a page
+        * Option to allow having Lx mandatory *except* when a specific location is defined (e.g. Polygon spanning 2 countries)
     """
 
     keys = ("L0", "L1", "L2", "L3", "L4", "L5",
@@ -4955,6 +5101,7 @@ class S3LocationSelector(S3Selector):
                  hide_lx = True,
                  reverse_lx = False,
                  show_address = False,
+                 address_required = None,
                  show_postcode = None,
                  postcode_required = None,
                  postcode_to_address = None,
@@ -4992,6 +5139,7 @@ class S3LocationSelector(S3Selector):
                                address line
             @param show_address: show a field for street address.
                                  If the parameter is set to a string then this is used as the label.
+            @param address_required: address field is mandatory
             @param show_postcode: show a field for postcode
             @param postcode_required: postcode field is mandatory
             @param postcode_to_address: service to use to lookup a list of addresses from the postcode
@@ -5028,6 +5176,7 @@ class S3LocationSelector(S3Selector):
         self.hide_lx = hide_lx
         self.reverse_lx = reverse_lx
         self.show_address = show_address
+        self.address_required = address_required
         self.show_postcode = show_postcode
         self.postcode_required = postcode_required
         self.postcode_to_address = postcode_to_address or \
@@ -5075,6 +5224,8 @@ class S3LocationSelector(S3Selector):
 
         self.error_message = error_message
         self._represent = represent
+
+        self.field = Storage() # validate in inline forms doesn't go through call() 1st
 
     # -------------------------------------------------------------------------
     @property
@@ -5290,6 +5441,7 @@ class S3LocationSelector(S3Selector):
                                                  address,
                                                  label,
                                                  hidden = not address,
+                                                 required = self.address_required,
                                                  )
 
         # Postcode INPUT
@@ -5317,6 +5469,18 @@ class S3LocationSelector(S3Selector):
 
                 # Store form key in form
                 postcode_component[1]["data"] = {"k": formkey}
+
+                # Add controls
+                input_id = "%s_postcode_to_address" % fieldname
+                widget = DIV(A(T("Enter address manually"),
+                               _id = input_id,
+                               ))
+                component = ("",    # label
+                             widget,
+                             input_id,
+                             True, # hidden
+                             )
+                components["postcode_to_address"] = component
 
             components["postcode"] = postcode_component
 
@@ -5838,6 +6002,7 @@ class S3LocationSelector(S3Selector):
             table_style = False
 
         selectors = DIV() if not table_style else TABLE()
+        sappend = selectors.append
         for name in ("L0", "L1", "L2", "L3", "L4", "L5"):
             if name in components:
                 label, widget, input_id, hidden = components[name]
@@ -5848,13 +6013,19 @@ class S3LocationSelector(S3Selector):
                                     hidden = hidden,
                                     )
                 if tuple_rows:
-                    selectors.append(formrow[0])
-                    selectors.append(formrow[1])
+                    sappend(formrow[0])
+                    sappend(formrow[1])
                 else:
-                    selectors.append(formrow)
+                    sappend(formrow)
 
         inputs = TAG[""]() if not table_style else TABLE()
-        for name in ("address", "postcode", "lat", "lon", "latlon_toggle"):
+        for name in ("address",
+                     "postcode",
+                     "postcode_to_address",
+                     "lat",
+                     "lon",
+                     "latlon_toggle",
+                     ):
             if name in components:
                 label, widget, input_id, hidden = components[name]
                 formrow = formstyle("%s__row" % input_id,
@@ -6000,12 +6171,16 @@ class S3LocationSelector(S3Selector):
             _placeholder = label
         else:
             _placeholder = None
+
         widget = INPUT(_name = name,
                        _id = input_id,
                        _class = _class,
                        _placeholder = _placeholder,
                        value = s3_str(value),
                        )
+        if required:
+            # Enable client-side validation:
+            widget.add_class("required")
 
         return (_label, widget, input_id, hidden)
 
@@ -6643,9 +6818,14 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
                 errors[level] = current.T("Location Hierarchy is Required!")
                 break
 
+        # Address Required?
+        address = values_get("address")
+        if self.address_required and not address:
+            errors["address"] = current.T("Address is Required!")
+
         # Postcode Required?
         postcode = values_get("postcode")
-        if not postcode and self.postcode_required:
+        if self.postcode_required and not postcode:
             errors["postcode"] = current.T("Postcode is Required!")
 
         if errors:
@@ -6669,7 +6849,6 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
         else:
             # Read other details
             parent = values_get("parent")
-            address = values_get("address")
 
         if parent or address or postcode or \
            wkt is not None or \
@@ -6834,7 +7013,7 @@ i18n.location_not_found="%s"''' % (T("Address Mapped"),
                 level = location.level
                 if level:
                     # Accept all levels above and including the lowest selectable level
-                    for i in xrange(5,-1,-1):
+                    for i in xrange(5, -1, -1):
                         if "L%s" % i in levels:
                             accepted_levels = set("L%s" % l for l in xrange(i, -1, -1))
                             break
@@ -9313,7 +9492,8 @@ class S3QuestionEditorWidget(FormWidget):
                name,
                value,
                label,
-               _type="text"):
+               _type = "text"
+               ):
         """
             Render a text input with given attributes
 
@@ -9460,6 +9640,7 @@ class ICON(I):
             "done": "fa-check",
             "down": "fa-caret-down",
             "edit": "fa-edit",
+            "eraser": "fa-eraser",
             "event": "fa-bolt",
             "exclamation": "fa-exclamation",
             "eye": "fa-eye",
@@ -9534,6 +9715,7 @@ class ICON(I):
             "time": "fa-time",
             "truck": "fa-truck",
             "twitter": "fa-twitter",
+            "undo": "fa-undo",
             "unsent": "fa-times",
             "up": "fa-caret-up",
             "upload": "fa-upload",
@@ -9565,6 +9747,7 @@ class ICON(I):
             "deploy": "fi-plus",
             "deployed": "fi-check",
             "edit": "fi-page-edit",
+            "eraser": "fi-trash",
             "exclamation": "fi-alert",
             "eye": "fi-eye",
             "facebook": "fi-social-facebook",
@@ -9626,6 +9809,7 @@ class ICON(I):
             "tasks": "fi-clipboard-notes",
             "time": "fi-clock",
             "twitter": "fi-social-twitter",
+            "undo": "fi-arrow-left",
             "unsent": "fi-x",
             "upload": "fi-upload",
             "user": "fi-torso",
@@ -9658,6 +9842,7 @@ class ICON(I):
             "deployed": "icon-ok",
             "down": "icon-caret-down",
             "edit": "icon-edit",
+            "eraser": "icon-eraser",
             "exclamation": "icon-exclamation",
             "eye": "icon-eye-open",
             "facebook": "icon-facebook",
@@ -9721,6 +9906,7 @@ class ICON(I):
             "time": "icon-time",
             "truck": "icon-truck",
             "twitter": "icon-twitter",
+            "undo": "icon-undo",
             "unsent": "icon-remove",
             "up": "icon-caret-up",
             "upload": "icon-upload-alt",
