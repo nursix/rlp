@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Translate Model
 
-""" Sahana Eden Translate Model
-
-    @copyright: 2012-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2012-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,15 +25,15 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3TranslateModel",)
+__all__ = ("TranslateModel",
+           )
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
-from s3compat import PY2
+from ..core import *
 
 # =============================================================================
-class S3TranslateModel(S3Model):
+class TranslateModel(DataModel):
 
     names = ("translate_language",
              "translate_percentage",
@@ -49,7 +47,7 @@ class S3TranslateModel(S3Model):
         #---------------------------------------------------------------------
         # Translated CSV files
         #
-        from ..s3.s3translate import TranslateAPI
+        from core.tools.translate import TranslateAPI
 
         langlist = sorted(TranslateAPI.get_langcodes())
 
@@ -91,7 +89,7 @@ class S3TranslateModel(S3Model):
 
         #----------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -108,10 +106,7 @@ class S3TranslateModel(S3Model):
             form.errors["file"] = current.T("No file uploaded.")
             return
 
-        if PY2:
-            header = csvfile.read(1024)
-        else:
-            header = csvfile.read(1024).decode("utf-8")
+        header = csvfile.read(1024).decode("utf-8")
 
         try:
             dialect = csv.Sniffer().sniff(header)
@@ -132,7 +127,7 @@ class S3TranslateModel(S3Model):
         import csv
         import os
 
-        from ..s3.s3translate import Strings
+        from core.tools.translate import Strings
 
         form_vars = form.vars
         lang_code = form_vars.code

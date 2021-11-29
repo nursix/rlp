@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
+"""
+    Data Collection Models
+    - a front-end UI to manage Assessments which uses the
+      Dynamic Tables back-end
 
-""" Sahana Eden Data Collection Models
-    - a front-end UI to manage Assessments which uses the Dynamic Tables
-      back-end
-
-    @copyright: 2014-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2014-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -36,18 +34,19 @@ __all__ = ("DataCollectionTemplateModel",
            "dc_rheader",
            )
 
+from io import BytesIO
+
 from gluon import *
 from gluon.languages import read_dict, write_dict
 
-from ..s3 import *
-from s3compat import BytesIO, xrange
+from ..core import *
 from s3layouts import S3PopupLink
 
 # Compact JSON encoding
 SEPARATORS = (",", ":")
 
 # =============================================================================
-class DataCollectionTemplateModel(S3Model):
+class DataCollectionTemplateModel(DataModel):
     """
         Templates to use for Assessments / Surveys
         - uses the Dynamic Tables back-end to store Questions
@@ -90,7 +89,7 @@ class DataCollectionTemplateModel(S3Model):
                      Field("master", length=32,
                            default = "dc_response",
                            label = T("Used for"),
-                           represent = S3Represent(options = master_opts),
+                           represent = represent_option(master_opts),
                            requires = IS_IN_SET(master_opts),
                            # Either set via Controller or on Import
                            readable = False,
@@ -259,7 +258,7 @@ class DataCollectionTemplateModel(S3Model):
                      Field("field_type", "integer", notnull=True,
                            default = 1, # string
                            label = T("Field Type"),
-                           represent = S3Represent(options = type_opts),
+                           represent = represent_option(type_opts),
                            requires = IS_IN_SET(type_opts),
                            ),
                      Field("options", "json",
@@ -448,12 +447,7 @@ class DataCollectionTemplateModel(S3Model):
     def defaults():
         """ Safe defaults for names in case the module is disabled """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False,
-                                )
-
-        return {"dc_template_id": lambda **attr: dummy("template_id"),
+        return {"dc_template_id": S3ReusableField.dummy("template_id"),
                 }
 
     # -------------------------------------------------------------------------
@@ -971,7 +965,7 @@ class DataCollectionTemplateModel(S3Model):
             translations = {}
 
         # Add ours
-        for i in xrange(len_options):
+        for i in range(len_options):
             original = s3_str(options[i])
             translated = s3_str(options_l10n[i])
             if original != translated:
@@ -981,7 +975,7 @@ class DataCollectionTemplateModel(S3Model):
         write_dict(w2pfilename, translations)
 
 # =============================================================================
-class DataCollectionModel(S3Model):
+class DataCollectionModel(DataModel):
     """
         Results of Assessments / Surveys
         - uses the Dynamic Tables back-end to store Answers
@@ -1051,7 +1045,7 @@ class DataCollectionModel(S3Model):
                      Field("status", "integer",
                            default = default_status,
                            label = T("Status"),
-                           represent = S3Represent(options = status_opts),
+                           represent = represent_option(status_opts),
                            requires = IS_IN_SET(status_opts),
                            readable = target_status,
                            writable = target_status,
@@ -1118,7 +1112,7 @@ class DataCollectionModel(S3Model):
             msg_record_deleted = T("Data Collection Target deleted"),
             msg_list_empty = T("No Data Collection Targets currently registered"))
 
-        self.set_method("dc", "target",
+        self.set_method("dc_target",
                         method = "results",
                         action = dc_TargetReport())
 
@@ -1256,13 +1250,10 @@ class DataCollectionModel(S3Model):
     def defaults():
         """ Safe defaults for names in case the module is disabled """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False,
-                                )
+        dummy = S3ReusableField.dummy
 
-        return {"dc_response_id": lambda **attr: dummy("response_id"),
-                "dc_target_id": lambda **attr: dummy("target_id"),
+        return {"dc_response_id": dummy("response_id"),
+                "dc_target_id": dummy("target_id"),
                 }
 
     # -------------------------------------------------------------------------
@@ -1373,7 +1364,7 @@ class DataCollectionModel(S3Model):
             #            raise ValueError("Code required for Grid Questions")
             #        rows = [s3_str(T(v)) for v in grid[0]]
             #        cols = [s3_str(T(v)) for v in grid[1]]
-            #        fields = [[0 for x in xrange(len(rows))] for y in xrange(len(cols))]
+            #        fields = [[0 for x in range(len(rows))] for y in range(len(cols))]
             #        grids[code] = {"r": rows,
             #                       "c": cols,
             #                       "f": fields,
@@ -1533,7 +1524,7 @@ class DataCollectionModel(S3Model):
                 s3.scripts.append("/%s/static/scripts/S3/s3.dc_answer.min.js" % r.application)
 
 # =============================================================================
-class dc_TargetReport(S3Method):
+class dc_TargetReport(CRUDMethod):
     """
         Display a Summary of the Target (i.e. collection of Responses)
 
@@ -1548,10 +1539,11 @@ class dc_TargetReport(S3Method):
     # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Entry point for REST API
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller arguments
+            Args:
+                r: the CRUDRequest
+                attr: controller arguments
         """
 
         if r.name == "target":
@@ -1844,7 +1836,7 @@ class dc_TargetReport(S3Method):
                    (original is project_SummaryReport)
         """
 
-        from s3.codecs.pdf import EdenDocTemplate, S3RL_PDF
+        from core.resource.codecs.pdf import EdenDocTemplate, S3RL_PDF
 
         T = current.T
         table = r.table
@@ -1891,11 +1883,12 @@ class dc_TargetReport(S3Method):
         return doc.output.getvalue()
 
 # =============================================================================
-class dc_TargetXLS(S3Method):
+class dc_TargetXLS(CRUDMethod):
 
+    # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
 
-        from s3.codecs.xls import S3XLS
+        from core.resource.codecs.xls import S3XLS
 
         try:
             import xlwt
@@ -1950,8 +1943,8 @@ class dc_TargetXLS(S3Method):
                       export_datetime.minute,
                       export_datetime.second)
         export_date_value = xldate_from_datetime_tuple(date_tuple, 0)
-        export_label = s3_unicode("%s:" % T("Date Exported"))
-        date_label = s3_unicode(T("Date Entered"))
+        export_label = s3_str("%s:" % T("Date Exported"))
+        date_label = s3_str(T("Date Entered"))
 
         # Create the workbook
         book = xlwt.Workbook(encoding = "utf-8")
@@ -2195,7 +2188,7 @@ class dc_TargetXLS(S3Method):
                         raw_answer = row.get(question["field"])
                         if raw_answer is None:
                             answer = None
-                        else:                        
+                        else:
                             answer = likert_options[scale][raw_answer]
                     else:
                         answer = row.get(question["field"])

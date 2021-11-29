@@ -1,8 +1,12 @@
-# -*- coding: utf-8 -*-
+"""
+    Menu layouts for RLP
+
+    License: MIT
+"""
 
 from gluon import *
 from gluon.storage import Storage
-from s3 import *
+from core import *
 from s3theme import NAV, SECTION
 
 # =============================================================================

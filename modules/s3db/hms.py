@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Hospital Management System Model
 
-""" Sahana Eden Hospital Management System Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -28,7 +26,7 @@
 """
 
 __all__ = ("HospitalDataModel",
-           "CholeraTreatmentCapabilityModel",
+           "HospitalCTCModel",
            "HospitalActivityReportModel",
            "hms_hospital_rheader"
            )
@@ -36,12 +34,12 @@ __all__ = ("HospitalDataModel",
 from gluon import *
 from gluon.storage import Storage
 
-from ..s3 import *
+from ..core import *
 from s3dal import Row
 from s3layouts import S3PopupLink
 
 # =============================================================================
-class HospitalDataModel(S3Model):
+class HospitalDataModel(DataModel):
 
     names = ("hms_hospital",
              "hms_contact",
@@ -389,7 +387,9 @@ class HospitalDataModel(S3Model):
                                       )
 
         # Components
-        single = dict(joinby="hospital_id", multiple=False)
+        single = {"joinby": "hospital_id",
+                  "multiple": False,
+                  }
         multiple = "hospital_id"
         add_components(tablename,
                        hms_status = single,
@@ -410,7 +410,7 @@ class HospitalDataModel(S3Model):
                            )
 
         # Custom Method to Assign HRs
-        self.set_method("hms", "hospital",
+        self.set_method("hms_hospital",
                         method = "assign",
                         action = self.hrm_AssignMethod(component="human_resource_site"))
 
@@ -909,18 +909,14 @@ class HospitalDataModel(S3Model):
         # ---------------------------------------------------------------------
         # Return global names to s3db
         #
-        return dict(hms_hospital_id = hospital_id,
-                    )
+        return {"hms_hospital_id": hospital_id,
+                }
 
     # -------------------------------------------------------------------------
     def defaults(self):
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return dict(hms_hospital_id = lambda **attr: dummy("hospital_id"),
-                    )
+        return {"hms_hospital_id": S3ReusableField.dummy("hospital_id"),
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -987,7 +983,7 @@ class HospitalDataModel(S3Model):
                                                 available_beds=a_beds)
 
 # =============================================================================
-class CholeraTreatmentCapabilityModel(S3Model):
+class HospitalCTCModel(DataModel):
 
     names = ("hms_ctc",)
 
@@ -1126,15 +1122,15 @@ class CholeraTreatmentCapabilityModel(S3Model):
         # ---------------------------------------------------------------------
         # Return global names to s3db
         #
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     def defaults(self):
 
-        return {}
+        return None
 
 # =============================================================================
-class HospitalActivityReportModel(S3Model):
+class HospitalActivityReportModel(DataModel):
 
     names = ("hms_activity",)
 
@@ -1218,12 +1214,12 @@ class HospitalActivityReportModel(S3Model):
         # ---------------------------------------------------------------------
         # Return global names to s3db
         #
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     def defaults(self):
 
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1274,12 +1270,10 @@ def hms_hospital_rheader(r, tabs=None):
                     permit = current.auth.s3_has_permission
                     if permit("update", tablename, r.id) and \
                        permit("create", "hrm_human_resource_site"):
-                        tabs.append((T("Assign %(staff)s") % dict(staff=STAFF), "assign"))
+                        tabs.append((T("Assign %(staff)s") % {"staff": STAFF}, "assign"))
 
                 tabs.extend(s3db.req_tabs(r, match=False))
                 tabs.extend(s3db.inv_tabs(r))
-
-                tabs.append((T("User Roles"), "roles"))
 
             rheader_tabs = s3_rheader_tabs(r, tabs)
 

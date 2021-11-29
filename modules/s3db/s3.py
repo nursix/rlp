@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    System Tables
 
-""" S3 Framework Tables
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -29,6 +27,7 @@
 
 __all__ = ("S3HierarchyModel",
            "S3DashboardModel",
+           "S3ImportJobModel",
            "S3DynamicTablesModel",
            "s3_table_rheader",
            "s3_scheduler_rheader",
@@ -37,10 +36,10 @@ __all__ = ("S3HierarchyModel",
 import random
 
 from gluon import *
-from ..s3 import *
+from ..core import *
 
 # =============================================================================
-class S3HierarchyModel(S3Model):
+class S3HierarchyModel(DataModel):
     """ Model for stored object hierarchies """
 
     names = ("s3_hierarchy",
@@ -63,16 +62,16 @@ class S3HierarchyModel(S3Model):
         # ---------------------------------------------------------------------
         # Return global names to s3.*
         #
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     def defaults(self):
         """ Safe defaults if module is disabled """
 
-        return {}
+        return None
 
 # =============================================================================
-class S3DashboardModel(S3Model):
+class S3DashboardModel(DataModel):
     """ Model for stored dashboard configurations """
 
     names = ("s3_dashboard",
@@ -125,13 +124,13 @@ class S3DashboardModel(S3Model):
         # ---------------------------------------------------------------------
         # Return global names to s3.*
         #
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     def defaults(self):
         """ Safe defaults if module is disabled """
 
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -171,7 +170,44 @@ class S3DashboardModel(S3Model):
             db(query).update(active = False)
 
 # =============================================================================
-class S3DynamicTablesModel(S3Model):
+class S3ImportJobModel(DataModel):
+    """ Tables to store pending import jobs """
+
+    names = ("s3_import_job",
+             "s3_import_item",
+             )
+
+    def model(self):
+
+        # ---------------------------------------------------------------------
+        tablename = "s3_import_job"
+        self.define_table(tablename,
+                          Field("job_id", length=128, unique=True, notnull=True),
+                          Field("tablename"),
+                          s3_datetime("timestmp", default="now"),
+                          )
+
+        # ---------------------------------------------------------------------
+        tablename = "s3_import_item"
+        self.define_table(tablename,
+                          Field("item_id", length=128, unique=True, notnull=True),
+                          Field("job_id", length=128),
+                          Field("tablename", length=128),
+                          Field("record_uid"),
+                          Field("skip", "boolean"),
+                          Field("error", "text"),
+                          Field("data", "blob"),
+                          Field("element", "text"),
+                          Field("ritems", "list:string"),
+                          Field("citems", "list:string"),
+                          Field("parent", length=128),
+                          )
+
+        # ---------------------------------------------------------------------
+        return None
+
+# =============================================================================
+class S3DynamicTablesModel(DataModel):
     """ Model for dynamic tables """
 
     names = ("s3_table",
@@ -414,7 +450,8 @@ class S3DynamicTablesModel(S3Model):
         """
             Generate a random name
 
-            @return: an 8-character random name
+            Returns:
+                an 8-character random name
         """
 
         alpha = "abcdefghijklmnopqrstuvwxyz"
@@ -426,7 +463,8 @@ class S3DynamicTablesModel(S3Model):
         """
             Set functions to call before write
 
-            @param table: the table (s3_table)
+            Args:
+                table: the table (s3_table)
         """
 
         update_default = cls.s3_table_name_update_default
@@ -441,9 +479,11 @@ class S3DynamicTablesModel(S3Model):
             Set a new default table name when the current default
             is written (to prevent duplicates, i.e. single-use default)
 
-            @param data: the data currently being written
+            Args:
+                data: the data currently being written
 
-            @returns: nothing (otherwise insert/update will not work)
+            Returns:
+                nothing (otherwise insert/update will not work)
         """
 
         table = current.s3db.s3_table
@@ -462,10 +502,12 @@ class S3DynamicTablesModel(S3Model):
             Return a representation function for dynamic table names,
             renders the table name as a link to the table controller
 
-            @param c: the controller prefix
-            @param f: the function name
+            Args:
+                c: the controller prefix
+                f: the function name
 
-            @returns: function
+            Returns:
+                function
         """
 
         def represent(value):
@@ -679,7 +721,7 @@ def s3_scheduler_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from core import s3_rheader_resource, S3ResourceHeader
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:

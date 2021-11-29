@@ -28,11 +28,6 @@
  *   - $.searchDownloadS3              - provided by s3.filter.js, used for exports
  *   - S3.Utf8.decode                  - provided by S3.js
  *   - S3.addModals                    - provided by S3.js
- *
- * - provides:
- *
- *   - S3.dataTables.initDataTable     - not implemented, used by vulnerability TODO
- *   - S3.dataTables.accordionRow      - not implemented, used by vulnerability TODO
  */
 (function($, undefined) {
 
@@ -333,8 +328,7 @@
             var serverSide = true,
                 processing = true,
                 fnAjax = null;
-            // FIXME Why is this a string and not a boolean? (It's JSON anyway)
-            if (tableConfig.pagination == 'true') {
+            if (tableConfig.pagination) {
                 // Server-side Pagination
                 this.ajaxUrl = tableConfig.ajaxUrl;
                 fnAjax = this._pipeline({cache: this._initCache()});
@@ -363,8 +357,7 @@
                 'pagingType': tableConfig.pagingType,
                 'processing': processing,
                 'searchDelay': 450,
-                // FIXME Why is this a string and not a boolean:
-                'searching': tableConfig.searching == 'true',
+                'searching': tableConfig.searching,
                 'serverSide': serverSide,
                 'search': {
                     // Workaround for dataTables bug:
@@ -843,7 +836,7 @@
 
                 // Add per-row CSS classes
                 var styles = tableConfig.rowStyles;
-                if (styles.length) {
+                if (styles) {
                     var row = $(nRow);
                     for (var style in styles) {
                         if (inList(recordId, styles[style]) != -1) {
@@ -927,14 +920,14 @@
                 // - configured as array of [[groupingColumnIndex, 'asc'|'desc'], ...]
                 var tableConfig = self.tableConfig,
                     groups = tableConfig.group;
-                if (groups.length) {
+                if (groups && groups.length) {
 
                     // Array of preceding grouping column indices, used to
                     // construct a key for groupTotals
                     var prefixID = [];
 
                     // Insert the header rows for all groups
-                    tableConfig.group.forEach(function(group, i) {
+                    groups.forEach(function(group, i) {
                         var groupTotals = tableConfig.groupTotals[i] || {},
                             groupTitles = tableConfig.groupTitles[i] || [];
                         self._renderGroups(oSettings, group[0], groupTitles, groupTotals, prefixID, i + 1);
@@ -1116,9 +1109,12 @@
             var tableConfig = this.tableConfig,
                 maxLength = tableConfig.textMaxLength,
                 shrinkLength = tableConfig.textShrinkLength,
-                groups = tableConfig.group.map(function(group) { return group[0]; }),
+                groups = null,
                 colIdx = 0;
 
+            if (tableConfig.group) {
+                groups = tableConfig.group.map(function(group) { return group[0]; });
+            }
             for (var i = 0; i < data.length; i++) {
 
                 // Ignore any columns used for groups
@@ -1429,7 +1425,11 @@
                     continue;
                 }
 
-                rowData = oSettings.aoData[oSettings.aiDisplay[dataCnt]]._aData;
+                if (oSettings.aoData.length) {
+                    rowData = oSettings.aoData[oSettings.aiDisplay[dataCnt]]._aData;
+                } else {
+                    continue;
+                }
 
                 if (row.hasClass('group')) {
                     // A group header row of a higher level
@@ -1587,7 +1587,7 @@
             // Add open/close-icons (arrows on the right)
             if (collapsable && addIcons) {
 
-                var expandIcons = tableConfig.groupIcon,
+                var expandIcons = tableConfig.groupIcon | [],
                     expandIconType;
                 if (expandIcons.length >= level) {
                     expandIconType = expandIcons[level - 1];
@@ -1807,7 +1807,8 @@
                 if (link.search) {
                     var items = link.search.slice(1).split('&'),
                         queries = items.map(function(item) {
-                            return item.split('=');
+                            var q = item.split('=');
+                            return [decodeURIComponent(q[0]), decodeURIComponent(q[1])];
                         }).filter(function(item) {
                             return item[0].indexOf('.') != -1;
                         });
@@ -1943,13 +1944,6 @@
 
         }, oSettings );
     };
-
-    // ------------------------------------------------------------------------
-    // GLOBAL FUNCTIONS
-
-    // TODO Make methods available for vulnerability/s3.report.js
-//     S3.dataTables.initDataTable = initDataTable;
-//     S3.dataTables.accordionRow = accordionRow;
 
     // ------------------------------------------------------------------------
     // DOCUMENT-READY

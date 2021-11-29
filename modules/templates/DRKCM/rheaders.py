@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
-
 """
-    Custom rheaders for DRKCM template
+    Custom rheaders for DRKCM
 
-    @license: MIT
+    License: MIT
 """
 
 from gluon import current, A, DIV, SPAN, URL
@@ -16,7 +14,7 @@ def drk_cr_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from core import s3_rheader_resource, S3ResourceHeader
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:
@@ -58,9 +56,9 @@ def drk_dvr_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, \
-                   S3ResourceHeader, \
-                   s3_fullname
+    from core import s3_rheader_resource, \
+                     S3ResourceHeader, \
+                     s3_fullname
     from .uioptions import get_ui_options
 
     tablename, record = s3_rheader_resource(r)
@@ -273,7 +271,7 @@ def drk_dvr_rheader(r, tabs=None):
                             )
 
             # Add profile picture
-            from s3 import s3_avatar_represent
+            from core import s3_avatar_represent
             rheader.insert(0, A(s3_avatar_represent(record_id,
                                                     "pr_person",
                                                     _class = "rheader-avatar",
@@ -315,7 +313,7 @@ def drk_org_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, s3_rheader_tabs, S3ResourceHeader
+    from core import s3_rheader_resource, s3_rheader_tabs, S3ResourceHeader
     from .uioptions import get_ui_options
 
     s3db = current.s3db
@@ -354,7 +352,9 @@ def drk_org_rheader(r, tabs=None):
                     (T("Counseling Themes"), "response_theme"),
                     ]
 
-            if is_admin or ui_options.get("response_themes_needs"):
+            if is_admin or \
+               ui_options.get("response_themes_needs") or \
+               ui_options.get("activity_use_need"):
                 # Ability to manage org-specific need types
                 # as they are used in themes:
                 tabs.append((T("Counseling Reasons"), "need"))

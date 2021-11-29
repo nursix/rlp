@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Assessments Model
 
-""" Sahana Eden Assessments Model
-
-    @copyright: 2012-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2012-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,15 +25,15 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3Assess24HModel",
-           "S3AssessBuildingModel",
-           "S3AssessCanvassModel",
-           "S3AssessNeedsModel",
+__all__ = ("Assess24HModel",
+           "AssessBuildingModel",
+           "AssessCanvassModel",
+           "AssessNeedsModel",
            )
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 
 # @ToDo: Shouldn't have T at module level
 T = current.T
@@ -49,7 +47,7 @@ assess_property_type_opts = {
     }
 
 # =============================================================================
-class S3Assess24HModel(S3Model):
+class Assess24HModel(DataModel):
     """
         IFRC 24H Assessment form
     """
@@ -127,10 +125,10 @@ class S3Assess24HModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # =============================================================================
-class S3AssessBuildingModel(S3Model):
+class AssessBuildingModel(DataModel):
     """
         Building Damage Assessment form
     """
@@ -785,7 +783,7 @@ class S3AssessBuildingModel(S3Model):
                        )
 
         # Generate Work Order
-        self.set_method("assess", "building",
+        self.set_method("assess_building",
                         method="form",
                         action=self.assess_building_form)
 
@@ -992,7 +990,7 @@ class S3AssessBuildingModel(S3Model):
                     )
 
         WORK_ORDER = current.T("Work Order")
-        from s3 import S3Exporter
+        from core import S3Exporter
         exporter = S3Exporter().pdf
         return exporter(r,
                         method = "read",
@@ -1006,7 +1004,7 @@ class S3AssessBuildingModel(S3Model):
                         )
 
 # =============================================================================
-class S3AssessCanvassModel(S3Model):
+class AssessCanvassModel(DataModel):
     """
         Building Canvassing form
     """
@@ -1088,10 +1086,10 @@ class S3AssessCanvassModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # =============================================================================
-class S3AssessNeedsModel(S3Model):
+class AssessNeedsModel(DataModel):
     """
         Needs Assessment form
         - based on Iraqi Red Crescent requirements
@@ -1231,7 +1229,7 @@ class S3AssessNeedsModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # =============================================================================
 def assess_multi_type_represent(ids, opts):

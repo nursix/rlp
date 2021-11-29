@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+"""
+    Voucher PDF Layouts for RLPPTM
+
+    License: MIT
+"""
 
 import os
 
@@ -10,17 +14,17 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from gluon import current
 
-from s3.codecs.card import S3PDFCardLayout
-from s3 import s3_str
+from core.resource.codecs.card import S3PDFCardLayout
+from core import s3_str
 
 # Fonts we use in this layout
 NORMAL = "Helvetica"
 BOLD = "Helvetica-Bold"
 
 # =============================================================================
-class VoucherCardLayout(S3PDFCardLayout):
+class RLPCardLayout(S3PDFCardLayout):
     """
-        Layout for printable vouchers
+        Parent class for PDF cards to implement common attributes and methods
     """
 
     cardsize = A4
@@ -28,14 +32,75 @@ class VoucherCardLayout(S3PDFCardLayout):
     doublesided = False
 
     # -------------------------------------------------------------------------
+    def draw_value(self, x, y, value, width=120, height=40, size=7, bold=True, valign=None, halign=None):
+        """
+            Helper function to draw a centered text above position (x, y);
+            allows the text to wrap if it would otherwise exceed the given
+            width
+
+            Args:
+                x: drawing position
+                y: drawing position
+                value: the text to render
+                width: the maximum available width (points)
+                height: the maximum available height (points)
+                size: the font size (points)
+                bold: use bold font
+                valign: vertical alignment ("top"|"middle"|"bottom"),
+                        default "bottom"
+                halign: horizontal alignment ("left"|"center")
+
+            Returns:
+                the actual height of the text element drawn
+        """
+
+        # Preserve line breaks by replacing them with <br/> tags
+        value = s3_str(value).strip("\n").replace('\n','<br />\n')
+
+        styleSheet = getSampleStyleSheet()
+        style = styleSheet["Normal"]
+        style.fontName = BOLD if bold else NORMAL
+        style.fontSize = size
+        style.leading = size + 2
+        style.splitLongWords = False
+        style.alignment = TA_CENTER if halign=="center" else TA_LEFT
+
+        para = Paragraph(value, style)
+        aW, aH = para.wrap(width, height)
+
+        while((aH > height or aW > width) and style.fontSize > 4):
+            # Reduce font size to make fit
+            style.fontSize -= 1
+            style.leading = style.fontSize + 2
+            para = Paragraph(value, style)
+            aW, aH = para.wrap(width, height)
+
+        if valign == "top":
+            vshift = aH
+        elif valign == "middle":
+            vshift = aH / 2.0
+        else:
+            vshift = 0
+
+        para.drawOn(self.canv, x - para.width / 2, y - vshift)
+        return aH
+
+# =============================================================================
+class VoucherCardLayout(RLPCardLayout):
+    """
+        Layout for printable vouchers
+    """
+
     @classmethod
     def fields(cls, resource):
         """
             The layout-specific list of fields to look up from the resource
 
-            @param resource: the resource
+            Args:
+                resource: the resource
 
-            @returns: list of field selectors
+            Returns:
+                list of field selectors
         """
 
         return ["id",
@@ -56,10 +121,12 @@ class VoucherCardLayout(S3PDFCardLayout):
         """
             Look up layout-specific common data for all cards
 
-            @param resource: the resource
-            @param items: the items
+            Args:
+                resource: the resource
+                items: the items
 
-            @returns: a dict with common data
+            Returns:
+                a dict with common data
         """
 
         db = current.db
@@ -225,57 +292,5 @@ class VoucherCardLayout(S3PDFCardLayout):
         else:
             # No backside
             pass
-
-    # -------------------------------------------------------------------------
-    def draw_value(self, x, y, value, width=120, height=40, size=7, bold=True, valign=None, halign=None):
-        """
-            Helper function to draw a centered text above position (x, y);
-            allows the text to wrap if it would otherwise exceed the given
-            width
-
-            @param x: drawing position
-            @param y: drawing position
-            @param value: the text to render
-            @param width: the maximum available width (points)
-            @param height: the maximum available height (points)
-            @param size: the font size (points)
-            @param bold: use bold font
-            @param valign: vertical alignment ("top"|"middle"|"bottom"),
-                           default "bottom"
-            @param halign: horizontal alignment ("left"|"center")
-
-            @returns: the actual height of the text element drawn
-        """
-
-        # Preserve line breaks by replacing them with <br/> tags
-        value = s3_str(value).strip("\n").replace('\n','<br />\n')
-
-        styleSheet = getSampleStyleSheet()
-        style = styleSheet["Normal"]
-        style.fontName = BOLD if bold else NORMAL
-        style.fontSize = size
-        style.leading = size + 2
-        style.splitLongWords = False
-        style.alignment = TA_CENTER if halign=="center" else TA_LEFT
-
-        para = Paragraph(value, style)
-        aW, aH = para.wrap(width, height)
-
-        while((aH > height or aW > width) and style.fontSize > 4):
-            # Reduce font size to make fit
-            style.fontSize -= 1
-            style.leading = style.fontSize + 2
-            para = Paragraph(value, style)
-            aW, aH = para.wrap(width, height)
-
-        if valign == "top":
-            vshift = aH
-        elif valign == "middle":
-            vshift = aH / 2.0
-        else:
-            vshift = 0
-
-        para.drawOn(self.canv, x - para.width / 2, y - vshift)
-        return aH
 
 # END =========================================================================

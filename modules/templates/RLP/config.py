@@ -1,10 +1,7 @@
-# -*- coding: utf-8 -*-
-
 """
-    Application Template for Rhineland-Palatinate (RLP) Crisis Management
-    - used to manage Volunteer Pools for COVID-19 response
+    RLP: Template for Rhineland-Palatinate (RLP) COVID-19 Volunteer Database
 
-    @license MIT
+    License: MIT
 """
 
 import datetime
@@ -14,7 +11,7 @@ from collections import OrderedDict
 from gluon import current, redirect, URL, A, DIV, TABLE, TAG, TR
 from gluon.storage import Storage
 
-from s3 import FS, IS_LOCATION, S3DateFilter, S3Represent, s3_fieldmethod, s3_fullname, s3_yes_no_represent
+from core import FS, IS_LOCATION, S3DateFilter, S3Represent, s3_fieldmethod, s3_fullname, s3_yes_no_represent
 from s3dal import original_tablename
 
 from .helpers import rlp_active_deployments
@@ -130,8 +127,6 @@ def config(settings):
     # 5: Apply Controller, Function & Table ACLs
     # 6: Apply Controller, Function, Table ACLs and Entity Realm
     # 7: Apply Controller, Function, Table ACLs and Entity Realm + Hierarchy
-    # 8: Apply Controller, Function, Table ACLs, Entity Realm + Hierarchy and Delegations
-    #
     settings.security.policy = 7
 
     # -------------------------------------------------------------------------
@@ -319,7 +314,7 @@ def config(settings):
 
         s3db = current.s3db
 
-        from s3 import S3SQLCustomForm, S3SQLInlineComponent, S3SQLInlineLink
+        from core import S3SQLCustomForm, S3SQLInlineComponent, S3SQLInlineLink
 
         record = r.record
         if r.tablename == "cms_series" and \
@@ -420,9 +415,9 @@ def config(settings):
         if r.tablename == "org_organisation" and not r.component:
 
             # Use custom form with email-address
-            from s3 import S3SQLCustomForm, \
-                           S3SQLInlineComponent, \
-                           S3SQLInlineLink
+            from core import S3SQLCustomForm, \
+                             S3SQLInlineComponent, \
+                             S3SQLInlineLink
 
             crud_fields = ["name",
                            "acronym",
@@ -507,7 +502,7 @@ def config(settings):
 
         if r.interactive:
 
-            from s3 import S3SQLCustomForm, S3SQLInlineLink
+            from core import S3SQLCustomForm, S3SQLInlineLink
             crud_fields = ["name",
                             #"code",
                             "organisation_id",
@@ -781,7 +776,7 @@ def config(settings):
 
             # Limit group selector to pools the person is not a member of yet
             field = table.group_id
-            from s3 import IS_ONE_OF
+            from core import IS_ONE_OF
             gtable = s3db.pr_group
             mtable = s3db.pr_group_membership
             query = (gtable.group_type.belongs(pool_type_ids)) & (mtable.id == None)
@@ -896,7 +891,8 @@ def config(settings):
                 - auto-generate an ID label
                 - update alias (in case name changed)
 
-            @param form: the FORM
+            Args:
+                form: the FORM
         """
 
         s3db = current.s3db
@@ -937,11 +933,12 @@ def config(settings):
             Post-process resource.select of pr_person to suppress
             field data the user is not permitted to see
 
-            @param records: list of selected data
-            @param rfields: list of S3ResourceFields in the records
-            @param represent: records contain represented data
-            @param as_rows: records are bare Rows rather than extracted
-                            Storage
+            Args:
+                records: list of selected data
+                rfields: list of S3ResourceFields in the records
+                represent: records contain represented data
+                as_rows: records are bare Rows rather than extracted
+                         Storage
         """
 
         auth = current.auth
@@ -1010,7 +1007,7 @@ def config(settings):
         s3db = current.s3db
 
         # Do not update group type in pre-imported pools (for import)
-        from s3 import S3Duplicate
+        from core import S3Duplicate
         s3db.configure("pr_group",
                        deduplicate = S3Duplicate(ignore_deleted = True,
                                                  noupdate = True,
@@ -1078,10 +1075,11 @@ def config(settings):
         """
             Customise availability fields in volunteer form
 
-            @param r: the current S3Request
+            Args:
+                r: the current CRUDRequest
         """
 
-        from s3 import S3WeeklyHoursWidget, S3WithIntro, s3_text_represent
+        from core import S3WeeklyHoursWidget, S3WithIntro, s3_text_represent
 
         avtable = current.s3db.pr_person_availability
         is_profile = r.controller == "default"
@@ -1125,11 +1123,13 @@ def config(settings):
         """
             Determine fields for volunteer list
 
-            @param r: the current S3Request
-            @param coordinator: user is COORDINATOR
-            @param name_fields: name fields in order
+            Args:
+                r: the current CRUDRequest
+                coordinator: user is COORDINATOR
+                name_fields: name fields in order
 
-            @returns: list of selectors (list_fields)
+            Returns:
+                list of selectors (list_fields)
         """
 
         if name_fields is None:
@@ -1175,7 +1175,7 @@ def config(settings):
 
         # Status, current deployment and account info as last columns
         if coordinator:
-            from s3 import S3DateTime
+            from core import S3DateTime
             current.s3db.auth_user.created_on.represent = S3DateTime.datetime_represent
 
             list_fields.extend([
@@ -1196,16 +1196,18 @@ def config(settings):
         """
             Determine fields for volunteer form
 
-            @param coordinator: user is COORDINATOR
-            @param show_contact_details: show contact information
-            @param name_fields: name fields in order
+            Args:
+                coordinator: user is COORDINATOR
+                show_contact_details: show contact information
+                name_fields: name fields in order
 
-            @returns: list of form fields
+            Returns:
+                list of form fields
         """
 
-        from s3 import (S3SQLInlineComponent,
-                        S3SQLInlineLink,
-                        )
+        from core import (S3SQLInlineComponent,
+                          S3SQLInlineLink,
+                          )
 
         crud_fields = [
                 S3SQLInlineLink("pool",
@@ -1357,18 +1359,18 @@ def config(settings):
             controller = r.controller
 
             from gluon import IS_NOT_EMPTY
-            from s3 import (IS_ONE_OF,
-                            IS_PERSON_GENDER,
-                            S3AgeFilter,
-                            S3LocationFilter,
-                            S3LocationSelector,
-                            S3OptionsFilter,
-                            S3RangeFilter,
-                            S3SQLCustomForm,
-                            S3TextFilter,
-                            StringTemplateParser,
-                            s3_get_filter_opts,
-                            )
+            from core import (IS_ONE_OF,
+                              IS_PERSON_GENDER,
+                              S3AgeFilter,
+                              S3LocationFilter,
+                              S3LocationSelector,
+                              S3OptionsFilter,
+                              S3RangeFilter,
+                              S3SQLCustomForm,
+                              S3TextFilter,
+                              StringTemplateParser,
+                              s3_get_filter_opts,
+                              )
 
             # Make last name mandatory
             field = table.last_name
@@ -1427,8 +1429,8 @@ def config(settings):
                 coordinator = has_role("COORDINATOR")
 
                 # Configure anonymize-method
-                from s3 import S3Anonymize
-                s3db.set_method("pr", "person",
+                from core import S3Anonymize
+                s3db.set_method("pr_person",
                                 method = "anonymize",
                                 action = S3Anonymize,
                                 )
@@ -1671,7 +1673,7 @@ def config(settings):
 
                     # Custom Form
                     from gluon import IS_IN_SET
-                    from s3 import S3SQLInlineLink, S3WithIntro
+                    from core import S3SQLInlineLink, S3WithIntro
                     from .helpers import rlp_deployment_sites
                     crud_fields = name_fields
                     if volunteer_id:
@@ -1714,8 +1716,8 @@ def config(settings):
                                        )
 
                     # Configure anonymize-method
-                    from s3 import S3Anonymize
-                    s3db.set_method("pr", "person",
+                    from core import S3Anonymize
+                    s3db.set_method("pr_person",
                                     method = "anonymize",
                                     action = S3Anonymize,
                                     )
@@ -1766,7 +1768,7 @@ def config(settings):
                         buttons = output["buttons"]
 
                     # Anonymize-button
-                    from s3 import S3AnonymizeWidget
+                    from core import S3AnonymizeWidget
                     anonymize = S3AnonymizeWidget.widget(r,
                                              _class="action-btn anonymize-btn")
 
@@ -1810,8 +1812,9 @@ def config(settings):
         """
             Enforce workflow in delegation records
 
-            @param table: the Table used in the request (can be aliased)
-            @param record: the delegation record
+            Args:
+                table: the Table used in the request (can be aliased)
+                record: the delegation record
         """
 
         field = table.status
@@ -1887,16 +1890,18 @@ def config(settings):
             Determine possible alternative time intervals for
             delegation requests
 
-            @param target: the requested interval (start, end)
-            @param occupied: the occupied intervals colliding with the target
-            @param recurse: recursive call
-            @param original: the original target (in recursive calls)
+            Args:
+                target: the requested interval (start, end)
+                occupied: the occupied intervals colliding with the target
+                recurse: recursive call
+                original: the original target (in recursive calls)
 
-            @returns: the original target if no conflicts were found, or
-                      an interval correction as tuple (start, end)
-                      - start is None if only the end date needs correction
-                      - end is None if only the start date needs correction
-                      ...or None if no alternatives were found
+            Returns:
+                the original target if no conflicts were found, or
+                an interval correction as tuple (start, end)
+                - start is None if only the end date needs correction
+                - end is None if only the start date needs correction
+                ...or None if no alternatives were found
         """
 
         if not recurse:
@@ -2304,7 +2309,7 @@ def config(settings):
 
         # Cannot backdate delegation start
         if min_date:
-            from s3 import IS_UTC_DATE, S3CalendarWidget
+            from core import IS_UTC_DATE, S3CalendarWidget
             field = table.date
             field.requires = IS_UTC_DATE(minimum=min_date)
             field.widget = S3CalendarWidget(minimum = min_date,
@@ -2314,7 +2319,7 @@ def config(settings):
         # Configure custom forms
         auth = current.auth
         if auth.s3_has_role("COORDINATOR"):
-            from s3 import S3SQLCustomForm
+            from core import S3SQLCustomForm
             crud_form = S3SQLCustomForm("organisation_id",
                                         "person_id",
                                         "date",
@@ -2334,7 +2339,7 @@ def config(settings):
             s3db.configure("hrm_delegation", crud_form=crud_form)
 
         elif auth.s3_has_roles(("HRMANAGER", "VCMANAGER")):
-            from s3 import S3SQLCustomForm
+            from core import S3SQLCustomForm
             crud_form = S3SQLCustomForm("organisation_id",
                                         "person_id",
                                         "date",
@@ -2360,7 +2365,7 @@ def config(settings):
                     organisations = None
 
                 # Append inline-notifications
-                from s3 import S3WithIntro
+                from core import S3WithIntro
                 from .notifications import InlineNotifications
                 crud_form.append(
                     S3WithIntro(
@@ -2379,7 +2384,7 @@ def config(settings):
             #field = table.site_id
             #field.readable = field.writable = True
             #field.label = T("Deployment Site")
-            #from s3 import IS_ONE_OF
+            #from core import IS_ONE_OF
             #field.requires = IS_EMPTY_OR(IS_ONE_OF(current.db, "org_site.site_id",
             #                                       s3db.org_site_represent,
             #                                       ))
@@ -2504,7 +2509,7 @@ def config(settings):
             if r.interactive:
 
                 if not volunteer_id:
-                    from s3 import S3OptionsFilter, s3_get_filter_opts
+                    from core import S3OptionsFilter, s3_get_filter_opts
                     filter_widgets = [
                         S3OptionsFilter("person_id$pool_membership.group_id",
                                         label = T("Pool"),
@@ -2600,7 +2605,7 @@ def config(settings):
 
             # Set method for Ajax-lookup of notification data
             from .notifications import InlineNotificationsData
-            s3db.set_method("hrm", "delegation",
+            s3db.set_method("hrm_delegation",
                             method = "notifications",
                             action = InlineNotificationsData,
                             )
@@ -2616,7 +2621,7 @@ def config(settings):
 
             if r.controller == "vol" and volunteer_id and isinstance(output, dict):
 
-                from s3 import S3CustomController
+                from core import S3CustomController
 
                 method = r.method
                 if not method:
@@ -2767,10 +2772,6 @@ def config(settings):
         #    restricted = True,
         #    access = "|1|",     # Only Administrators can see this module in the default menu & access the controller
         #    module_type = None  # This item is handled separately for the menu
-        #)),
-        #("tour", Storage(
-        #    name_nice = T("Guided Tour Functionality"),
-        #    module_type = None,
         #)),
         #("translate", Storage(
         #    name_nice = T("Translation Functionality"),

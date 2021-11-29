@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    GIS Model
 
-""" Sahana Eden GIS Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,21 +25,19 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-from __future__ import division
-
-__all__ = ("S3LocationModel",
-           "S3LocationNameModel",
-           "S3LocationTagModel",
-           "S3LocationGroupModel",
-           "S3LocationHierarchyModel",
-           "S3GISConfigModel",
-           "S3LayerEntityModel",
-           "S3FeatureLayerModel",
-           "S3MapModel",
-           "S3GISThemeModel",
-           "S3PoIModel",
-           "S3PoIOrganisationGroupModel",
-           "S3PoIFeedModel",
+__all__ = ("GISLocationModel",
+           "GISLocationNameModel",
+           "GISLocationTagModel",
+           "GISLocationGroupModel",
+           "GISLocationHierarchyModel",
+           "GISConfigModel",
+           "GISLayerEntityModel",
+           "GISFeatureLayerModel",
+           "GISMapModel",
+           "GISThemeModel",
+           "GISPoIModel",
+           "GISPoIOrganisationGroupModel",
+           "GISPoIFeedModel",
            "gis_location_filter",
            "gis_LocationRepresent",
            "gis_layer_represent",
@@ -52,20 +48,20 @@ import json
 import os
 
 from collections import OrderedDict
+from io import BytesIO
 from uuid import uuid4
 
 from gluon import *
 from gluon.storage import Storage
 
-from ..s3 import *
-from s3compat import BytesIO, basestring
+from ..core import *
 from s3layouts import S3PopupLink
 
 # Compact JSON encoding
 SEPARATORS = (",", ":")
 
 # =============================================================================
-class S3LocationModel(S3Model):
+class GISLocationModel(DataModel):
     """
         Locations model
     """
@@ -127,7 +123,11 @@ class S3LocationModel(S3Model):
         else:
             meta_spatial_fields = (s3_meta_fields())
 
-        gis_location_represent = gis_LocationRepresent(show_link = True)
+        if current.auth.permission.format == "plain":
+            # Popup Maps from Map Popups is poor UX
+            gis_location_represent = gis_LocationRepresent()
+        else:
+            gis_location_represent = gis_LocationRepresent(show_link = True)
 
         tablename = "gis_location"
         self.define_table(tablename,
@@ -283,7 +283,7 @@ class S3LocationModel(S3Model):
                  # privileges from generic Authenticated users for particular locations (like
                  # hierarchy or region locations) by changing the owner on those locations, e.g.
                  # to MapAdmin.
-                 table.owned_by_group.set_attributes(default = current.session.s3.system_roles.AUTHENTICATED),
+                 #table.owned_by_group.set_attributes(default = current.session.s3.system_roles.AUTHENTICATED),
 
                  # Can't be defined in-line as otherwise get a circular reference
                  table.parent.set_attributes(requires = IS_EMPTY_OR(
@@ -372,7 +372,7 @@ class S3LocationModel(S3Model):
                        )
 
         # Custom Method for S3LocationAutocompleteWidget
-        self.set_method("gis", "location",
+        self.set_method("gis_location",
                         method = "search_ac",
                         action = self.gis_search_ac)
 
@@ -402,9 +402,6 @@ class S3LocationModel(S3Model):
 
                             # Sites
                             org_site = "location_id",
-
-                            # Tenures
-                            stdm_tenure = "location_id",
                             )
 
         # ---------------------------------------------------------------------
@@ -517,7 +514,7 @@ class S3LocationModel(S3Model):
                 else:
                     Lx_ids = None
                 results = gis.geocode(addr_street, postcode, Lx_ids)
-                if isinstance(results, basestring):
+                if isinstance(results, str):
                     # Error
                     if settings.get_gis_ignore_geocode_errors():
                         # Just Warn
@@ -719,50 +716,50 @@ class S3LocationModel(S3Model):
     @staticmethod
     def gis_location_duplicate(item):
         """
-          This callback will be called when importing location records it will look
-          to see if the record being imported is a duplicate.
+            This callback will be called when importing location records it will look
+            to see if the record being imported is a duplicate. If the record is a
+            duplicate then it will set the item method to update
 
-          @param item: An S3ImportItem object which includes all the details
-                       of the record being imported
+            Args:
+                item: An ImportItem object which includes all the details
+                      of the record being imported
 
-          If the record is a duplicate then it will set the item method to update
-
-          Rules for finding a duplicate:
-           - If there is no level, then deduplicate based on the address
-           - Look for a record with the same name, ignoring case
-           - If no match, also check name_l10n
-           - If parent exists in the import, the same parent
-           - If start_date exists in the import, the same start_date
-           - If end_date exists in the import, the same end_date
-
-            @ToDo: Check soundex? (only good in English)
-                   http://eden.sahanafoundation.org/ticket/481
-                   - make a deployment_setting for relevant function?
+            Notes:
+                Rules for finding a duplicate:
+                - If there is no level, then deduplicate based on the address
+                - Look for a record with the same name, ignoring case
+                - If no match, also check name_l10n
+                - If parent exists in the import, the same parent
+                - If start_date exists in the import, the same start_date
+                - If end_date exists in the import, the same end_date
         """
 
         data = item.data
-        name = data.get("name")
+        data_get = data.get
+        name = data_get("name")
 
         if not name:
             return
 
-        level = data.get("level")
+        level = data_get("level")
         if not level:
-            address = data.get("addr_street")
+            address = data_get("addr_street")
             if not address:
                 # Don't deduplicate precise locations as hard to ensure these have unique names
                 return
             table = item.table
-            query = (table.addr_street == address) & \
+            query = (table.name == name) & \
+                    (table.addr_street == address) & \
                     (table.deleted != True)
-            postcode = data.get("addr_postcode")
+            postcode = data_get("addr_postcode")
             if postcode:
                 query &= (table.addr_postcode == postcode)
-            parent = data.get("parent")
+            parent = data_get("parent")
             if parent:
                 query &= (table.parent == parent)
             duplicate = current.db(query).select(table.id,
-                                                 limitby=(0, 1)).first()
+                                                 limitby = (0, 1)
+                                                 ).first()
             if duplicate:
                 item.id = duplicate.id
                 item.method = item.METHOD.UPDATE
@@ -801,8 +798,9 @@ class S3LocationModel(S3Model):
             duplicate = current.db(query).select(table.id,
                                                  table.name,
                                                  table.level,
-                                                 orderby=orderby,
-                                                 limitby=(0, 1)).first()
+                                                 orderby = orderby,
+                                                 limitby = (0, 1)
+                                                 ).first()
 
             if duplicate:
                 # @ToDo: Import Log
@@ -813,9 +811,9 @@ class S3LocationModel(S3Model):
                 item.skip = skip(duplicate.level, duplicate.id)
                 return
 
-        parent = data.get("parent")
-        start_date = data.get("start_date")
-        end_date = data.get("end_date")
+        parent = data_get("parent")
+        start_date = data_get("start_date")
+        end_date = data_get("end_date")
 
         # @ToDo: check the the lat and lon if they exist?
         #lat = "lat" in data and data.lat
@@ -832,7 +830,7 @@ class S3LocationModel(S3Model):
             # PostgreSQL LOWER() on Windows doesn't convert it, although this seems to be a locale issue:
             # http://stackoverflow.com/questions/18507589/the-lower-function-on-international-characters-in-postgresql
             # Works fine on Debian servers if the locale is a .UTF-8 before the Postgres cluster is created
-            query = (table.name.lower() == s3_unicode(name).lower().encode("utf8")) & \
+            query = (table.name.lower() == s3_str(name).lower()) & \
                     (table.level == level)
         else :
             query = (table.name.lower() == name.lower()) & \
@@ -848,8 +846,9 @@ class S3LocationModel(S3Model):
 
         duplicate = current.db(query).select(table.id,
                                              table.level,
-                                             orderby=orderby,
-                                             limitby=(0, 1)).first()
+                                             orderby = orderby,
+                                             limitby = (0, 1)
+                                             ).first()
         if duplicate:
             # @ToDo: Import Log
             #current.log.debug("Location Match")
@@ -875,7 +874,8 @@ class S3LocationModel(S3Model):
                                                  table.name,
                                                  table.level,
                                                  orderby=orderby,
-                                                 limitby=(0, 1)).first()
+                                                 limitby = (0, 1)
+                                                 ).first()
             if duplicate:
                 # @ToDo: Import Log
                 #current.log.debug("Location l10n Match")
@@ -923,10 +923,11 @@ class S3LocationModel(S3Model):
     def gis_search_ac(r, **attr):
         """
             JSON search method for S3LocationAutocompleteWidget
-            - adds hierarchy support
+                - adds hierarchy support
 
-            @param r: the S3Request
-            @param attr: request attributes
+            Args:
+                r: the CRUDRequest
+                attr: request attributes
         """
 
         output = None
@@ -957,7 +958,7 @@ class S3LocationModel(S3Model):
 
         # We want to do case-insensitive searches
         # (default anyway on MySQL/SQLite, but not PostgreSQL)
-        value = s3_unicode(value).lower().strip()
+        value = s3_str(value).lower().strip()
 
         search_l10n = None
         translate = None
@@ -1076,7 +1077,7 @@ class S3LocationModel(S3Model):
         elif loc_select:
             # LocationSelector
             # @ToDo: Deprecate
-            from s3.s3export import S3Exporter
+            from core import S3Exporter
             output = S3Exporter().json(resource,
                                        start=0,
                                        limit=limit,
@@ -1188,10 +1189,10 @@ class S3LocationModel(S3Model):
 
                 _name_alt = row.get("gis_location_name_alt.name_alt", None)
                 _name_l10n = row.get("gis_location_name.name_l10n", None)
-                if isinstance(_name_alt, basestring):
+                if isinstance(_name_alt, str):
                     # Convert into list
                     _name_alt = [ _name_alt ]
-                if isinstance(_name_l10n, basestring):
+                if isinstance(_name_l10n, str):
                     _name_l10n = [ _name_l10n ]
 
                 alternate = dict(item)
@@ -1225,7 +1226,7 @@ class S3LocationModel(S3Model):
         return output
 
 # =============================================================================
-class S3LocationNameModel(S3Model):
+class GISLocationNameModel(DataModel):
     """
         Location Names model
         - local/alternate names for Locations
@@ -1293,10 +1294,10 @@ class S3LocationNameModel(S3Model):
                   )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3LocationTagModel(S3Model):
+class GISLocationTagModel(DataModel):
     """
         Location Tags model
         - flexible Key-Value component attributes to Locations
@@ -1376,7 +1377,7 @@ class S3LocationTagModel(S3Model):
         return od
 
 # =============================================================================
-class S3LocationGroupModel(S3Model):
+class GISLocationGroupModel(DataModel):
     """
         Location Groups model
         - currently unused
@@ -1429,10 +1430,10 @@ class S3LocationGroupModel(S3Model):
                      *s3_meta_fields())
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3LocationHierarchyModel(S3Model):
+class GISLocationHierarchyModel(DataModel):
     """
         Location Hierarchy model
     """
@@ -1608,7 +1609,7 @@ class S3LocationHierarchyModel(S3Model):
                     form.errors[gap] = hierarchy_gap
 
 # =============================================================================
-class S3GISConfigModel(S3Model):
+class GISConfigModel(DataModel):
     """
         GIS Config model: Web Map Context
         - Site config
@@ -2459,7 +2460,9 @@ class gis_MarkerRepresent(S3Represent):
     def represent_row(self, row):
         """
             Represent a Row
-            @param row: The Row
+
+            Args:
+                row: The Row
         """
         represent = DIV(IMG(_src=URL(c="static", f="img",
                                      args=["markers", row.image]),
@@ -2467,7 +2470,7 @@ class gis_MarkerRepresent(S3Represent):
         return represent
 
 # ==============================================================================
-class S3LayerEntityModel(S3Model):
+class GISLayerEntityModel(DataModel):
     """
         Model for Layer SuperEntity
         - used to provide a common link table for:
@@ -2523,7 +2526,7 @@ class S3LayerEntityModel(S3Model):
                           name_field()(),
                           desc_field()(),
                           #role_required(),       # Single Role
-                          ##roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                          ##roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                           )
 
         crud_strings[tablename] = Storage(
@@ -2853,7 +2856,7 @@ class S3LayerEntityModel(S3Model):
                               )
 
 # =============================================================================
-class S3FeatureLayerModel(S3Model):
+class GISFeatureLayerModel(DataModel):
     """
         Model for Feature Layers
         - used to select a set of Features for either Display on a Map
@@ -2973,7 +2976,7 @@ class S3FeatureLayerModel(S3Model):
                           gis_refresh()(),
                           cluster_attribute()(),
                           s3_role_required(),    # Single Role
-                          #s3_roles_permitted(), # Multiple Roles (needs implementing in modules/s3gis.py)
+                          #s3_roles_permitted(), # Multiple Roles (needs implementing in modules/core/gis)
                           *s3_meta_fields())
 
         # CRUD Strings
@@ -3007,7 +3010,7 @@ class S3FeatureLayerModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -3062,7 +3065,7 @@ class S3FeatureLayerModel(S3Model):
             item.method = item.METHOD.UPDATE
 
 # =============================================================================
-class S3MapModel(S3Model):
+class GISMapModel(DataModel):
     """ Models for Maps """
 
     names = ("gis_cache",
@@ -3223,7 +3226,7 @@ class S3MapModel(S3Model):
                            requires = IS_EMPTY_OR(IS_IN_SET(arc_img_formats)),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3246,7 +3249,7 @@ class S3MapModel(S3Model):
                            requires = IS_IN_SET(bing_layer_types),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3263,7 +3266,7 @@ class S3MapModel(S3Model):
                      name_field()(),
                      desc_field()(),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3280,7 +3283,7 @@ class S3MapModel(S3Model):
                      name_field()(),
                      desc_field()(),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3327,7 +3330,7 @@ class S3MapModel(S3Model):
                      gis_refresh()(),
                      cluster_attribute()(),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3367,7 +3370,7 @@ class S3MapModel(S3Model):
                            ),
                      gis_refresh()(),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3395,7 +3398,7 @@ class S3MapModel(S3Model):
                            requires = IS_IN_SET(google_layer_types),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3442,7 +3445,7 @@ class S3MapModel(S3Model):
                            represent = s3_yes_no_represent,
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3465,7 +3468,7 @@ class S3MapModel(S3Model):
                            label = T("Code"),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3520,7 +3523,7 @@ class S3MapModel(S3Model):
                            ),
                      gis_refresh()(),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3547,7 +3550,7 @@ class S3MapModel(S3Model):
                                                            T("The URL to access the service."))),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3594,7 +3597,7 @@ class S3MapModel(S3Model):
                            requires = IS_INT_IN_RANGE(1, 30),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3625,7 +3628,7 @@ class S3MapModel(S3Model):
                            requires = IS_IN_SET(openweathermap_layer_types),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3741,7 +3744,7 @@ class S3MapModel(S3Model):
                            requires = IS_INT_IN_RANGE(1, 30),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3827,7 +3830,7 @@ class S3MapModel(S3Model):
                       cluster_attribute()(),
                      #Field("editable", "boolean", default=False, label=T("Editable?")),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -3965,7 +3968,7 @@ class S3MapModel(S3Model):
                      #      requires = IS_EMPTY_OR(IS_IN_SET(gis_layer_wms_img_formats)),
                      #      ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -4009,7 +4012,7 @@ class S3MapModel(S3Model):
                            requires = IS_INT_IN_RANGE(1, 30),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         configure(tablename,
@@ -4060,7 +4063,7 @@ class S3MapModel(S3Model):
                      *s3_meta_fields())
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -4418,16 +4421,16 @@ class S3MapModel(S3Model):
         gis_layer_onaccept(form)
 
     # -------------------------------------------------------------------------
-    @staticmethod
-    def gis_layer_shapefile_onaccept_update(form):
+    @classmethod
+    def gis_layer_shapefile_onaccept_update(cls, form):
         """
             @ToDo: Check if the file has changed & run the normal onaccept if-so
         """
 
-        S3MapModel.gis_layer_shapefile_onaccept(form)
+        cls.gis_layer_shapefile_onaccept(form)
 
 # =============================================================================
-class S3GISThemeModel(S3Model):
+class GISThemeModel(DataModel):
     """
         Thematic Mapping model
 
@@ -4461,7 +4464,7 @@ class S3GISThemeModel(S3Model):
                            label = T("Date"),
                            ),
                      s3_role_required(),       # Single Role
-                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/s3gis.py)
+                     #s3_roles_permitted(),    # Multiple Roles (needs implementing in modules/core/gis)
                      *s3_meta_fields())
 
         self.configure(tablename,
@@ -4494,7 +4497,7 @@ class S3GISThemeModel(S3Model):
                                          )
 
         # Custom Method to generate a style
-        self.set_method("gis", "layer_theme",
+        self.set_method("gis_layer_theme",
                         method = "style",
                         action = self.gis_theme_style)
 
@@ -4587,7 +4590,7 @@ class S3GISThemeModel(S3Model):
         return json.dumps(style)
 
 # =============================================================================
-class S3PoIModel(S3Model):
+class GISPoIModel(DataModel):
     """
         Data Model for PoIs (Points of Interest)
     """
@@ -4890,7 +4893,7 @@ class S3PoIModel(S3Model):
             current.log.warning("Unable to update GIS PoI Style as there are multiple possible")
 
 # =============================================================================
-class S3PoIOrganisationGroupModel(S3Model):
+class GISPoIOrganisationGroupModel(DataModel):
     """
         PoI Organisation Group Model
 
@@ -4925,10 +4928,10 @@ class S3PoIOrganisationGroupModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3PoIFeedModel(S3Model):
+class GISPoIFeedModel(DataModel):
     """ Data Model for PoI feeds """
 
     names = ("gis_poi_feed",)
@@ -4946,7 +4949,7 @@ class S3PoIFeedModel(S3Model):
                           *s3_meta_fields())
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
 def name_field():
@@ -5057,8 +5060,9 @@ def gis_hierarchy_editable(level, location_id):
 
         Used by gis_location_onvalidation()
 
-        @param id: the id of the location or an ancestor - used to find
-                   the ancestor country location.
+        Args:
+            id: the id of the location or an ancestor - used to find
+                the ancestor country location.
     """
 
     country = current.gis.get_parent_country(location_id)
@@ -5180,9 +5184,10 @@ class gis_LocationRepresent(S3Represent):
         """
             Represent a (key, value) as hypertext link.
 
-            @param k: the key
-            @param v: the representation of the key
-            @param row: the row with this key (unused here)
+            Args:
+                k: the key
+                v: the representation of the key
+                row: the row with this key (unused here)
         """
 
         if k is None:
@@ -5257,7 +5262,8 @@ class gis_LocationRepresent(S3Represent):
             key and fields are not used, but are kept for API
             compatiblity reasons.
 
-            @param values: the gis_location IDs
+            Args:
+                values: the gis_location IDs
         """
 
         db = current.db
@@ -5369,10 +5375,11 @@ class gis_LocationRepresent(S3Represent):
     def represent_row(self, row):
         """
             Represent a single Row
-            - assumes that Path & Lx have been populated correctly by
-              gis.update_location_tree()
+                - assumes that Path & Lx have been populated correctly by
+                  gis.update_location_tree()
 
-            @param row: the gis_location Row
+            Args:
+                row: the gis_location Row
         """
 
         sep = self.sep
@@ -5526,7 +5533,7 @@ class gis_LocationRepresent(S3Represent):
                     else:
                         # Already inside a link with onclick-script
                         script = None
-                    represent = SPAN(s3_unicode(represent),
+                    represent = SPAN(s3_str(represent),
                                      ICON("map-marker",
                                           _title=self.lat_lon_represent(row),
                                           _onclick=script,

@@ -1,14 +1,12 @@
-# -*- coding: utf-8 -*-
-
 """
-    Custom rheaders for RLP template
+    Custom rheaders for RLP
 
-    @license: MIT
+    License: MIT
 """
 
 from gluon import current
 
-from s3 import s3_fullname
+from core import s3_fullname
 
 from .helpers import rlp_deployed_with_org
 
@@ -20,7 +18,7 @@ def rlp_vol_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from core import s3_rheader_resource, S3ResourceHeader
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:
@@ -136,7 +134,7 @@ def rlp_profile_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from core import s3_rheader_resource, S3ResourceHeader
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:
@@ -199,7 +197,7 @@ def rlp_org_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from core import s3_rheader_resource, S3ResourceHeader
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:
@@ -241,7 +239,7 @@ def rlp_delegation_rheader(r, tabs=None):
         # Resource headers only used in interactive views
         return None
 
-    from s3 import s3_rheader_resource, S3ResourceHeader
+    from core import s3_rheader_resource, S3ResourceHeader
 
     tablename, record = s3_rheader_resource(r)
     if tablename != r.tablename:

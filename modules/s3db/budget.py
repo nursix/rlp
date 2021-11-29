@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Budget Model
 
-""" Sahana Eden Budget Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,11 +25,11 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3BudgetModel",
-           "S3BudgetKitModel",
-           "S3BudgetBundleModel",
-           "S3BudgetAllocationModel",
-           "S3BudgetMonitoringModel",
+__all__ = ("BudgetModel",
+           "BudgetKitModel",
+           "BudgetBundleModel",
+           "BudgetAllocationModel",
+           "BudgetMonitoringModel",
            "budget_rheader",
            "budget_CostItemRepresent",
            )
@@ -39,12 +37,12 @@ __all__ = ("S3BudgetModel",
 from gluon import *
 from gluon.storage import Storage
 
-from ..s3 import *
+from ..core import *
 from s3dal import Row
 from s3layouts import S3PopupLink
 
 # =============================================================================
-class S3BudgetModel(S3Model):
+class BudgetModel(DataModel):
 
     names = ("budget_entity",
              "budget_budget",
@@ -438,10 +436,10 @@ class S3BudgetModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return dict(#budget_budget_id = budget_budget_id,
-                    budget_location_id = budget_location_id,
-                    budget_staff_id=budget_staff_id,
-                    )
+        return {#"budget_budget_id": budget_budget_id,
+                "budget_location_id": budget_location_id,
+                "budget_staff_id": budget_staff_id,
+                }
 
     # -------------------------------------------------------------------------
     def defaults(self):
@@ -449,14 +447,12 @@ class S3BudgetModel(S3Model):
             Safe defaults for model-global names in case module is disabled
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
+        dummy = S3ReusableField.dummy
 
-        return dict(budget_budget_id = lambda **attr: dummy("budget_id"),
-                    budget_location_id = lambda **attr: dummy("location_id"),
-                    budget_staff_id = lambda **attr: dummy("staff_id"),
-                    )
+        return {"budget_budget_id": dummy("budget_id"),
+                "budget_location_id": dummy("location_id"),
+                "budget_staff_id": dummy("staff_id"),
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -555,7 +551,7 @@ class S3BudgetModel(S3Model):
         return
 
 # =============================================================================
-class S3BudgetKitModel(S3Model):
+class BudgetKitModel(DataModel):
 
     names = ("budget_kit",
              "budget_item",
@@ -808,9 +804,9 @@ class S3BudgetKitModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return dict(budget_kit_id = budget_kit_id,
-                    budget_item_id = budget_item_id,
-                    )
+        return {"budget_kit_id": budget_kit_id,
+                "budget_item_id": budget_item_id,
+                }
 
     # -------------------------------------------------------------------------
     def defaults(self):
@@ -818,13 +814,11 @@ class S3BudgetKitModel(S3Model):
             Safe defaults for model-global names in case module is disabled
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
+        dummy = S3ReusableField.dummy
 
-        return dict(budget_kit_id = lambda **attr: dummy("kit_id"),
-                    budget_item_id = lambda **attr: dummy("item_id"),
-                    )
+        return {"budget_kit_id": dummy("kit_id"),
+                "budget_item_id": dummy("item_id"),
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -926,7 +920,7 @@ class S3BudgetKitModel(S3Model):
         return
 
 # =============================================================================
-class S3BudgetBundleModel(S3Model):
+class BudgetBundleModel(DataModel):
     """ Model for Budget Bundles """
 
     names = ("budget_bundle",
@@ -1166,8 +1160,8 @@ class S3BudgetBundleModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return dict(budget_bundle_id = budget_bundle_id,
-                    )
+        return {"budget_bundle_id": budget_bundle_id,
+                }
 
     # -------------------------------------------------------------------------
     def defaults(self):
@@ -1175,12 +1169,8 @@ class S3BudgetBundleModel(S3Model):
             Safe defaults for model-global names in case module is disabled
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return dict(budget_bundle_id = lambda **attr: dummy("bundle_id"),
-                    )
+        return {"budget_bundle_id": S3ReusableField.dummy("bundle_id"),
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1316,7 +1306,7 @@ class S3BudgetBundleModel(S3Model):
         return
 
 # =============================================================================
-class S3BudgetAllocationModel(S3Model):
+class BudgetAllocationModel(DataModel):
     """
         Model for Budget Allocation
    """
@@ -1410,7 +1400,7 @@ class S3BudgetAllocationModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     def defaults(self):
@@ -1418,7 +1408,7 @@ class S3BudgetAllocationModel(S3Model):
             Safe defaults for model-global names in case module is disabled
         """
 
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1426,8 +1416,8 @@ class S3BudgetAllocationModel(S3Model):
         """
             Import item de-duplication
 
-            @todo: additionally have an onaccept sanitizing overlapping
-                   allocations? (may be too simple, though)
+            TODO additionally have an onaccept sanitizing overlapping
+                 allocations? (may be too simple, though)
         """
 
         data = item.data
@@ -1454,7 +1444,7 @@ class S3BudgetAllocationModel(S3Model):
         return
 
 # =============================================================================
-class S3BudgetMonitoringModel(S3Model):
+class BudgetMonitoringModel(DataModel):
     """
         Budget Monitoring Model
 
@@ -1536,7 +1526,7 @@ class S3BudgetMonitoringModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1681,11 +1671,7 @@ class S3BudgetMonitoringModel(S3Model):
 class budget_CostItemRepresent(S3Represent):
     """ Representation of Cost Items """
 
-    # -------------------------------------------------------------------------
     def __init__(self, show_link=False):
-        """
-            Constructor
-        """
 
         super(budget_CostItemRepresent, self).__init__(lookup="budget_cost_item",
                                                        key="cost_item_id",
@@ -1704,9 +1690,10 @@ class budget_CostItemRepresent(S3Represent):
         """
             Custom rows lookup function
 
-            @param key: the key field
-            @param values: the values to look up
-            @param fields: unused (retained for API compatibility)
+            Args:
+                key: the key field
+                values: the values to look up
+                fields: unused (retained for API compatibility)
         """
 
         db = current.db
@@ -1791,7 +1778,8 @@ class budget_CostItemRepresent(S3Represent):
         """
             Represent a row
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         s3db = current.s3db
@@ -1976,7 +1964,8 @@ def budget_budget_totals(budget_entity_id):
     """
         Calculate Totals for a budget
 
-        @param budget_entity_id: the budget_entity record ID
+        Args:
+            budget_entity_id: the budget_entity record ID
     """
 
     db = current.db
@@ -2041,8 +2030,9 @@ def budget_budget_totals(budget_entity_id):
                                 row[linktable.months]
 
     table = s3db.budget_budget
-    db(table.id == budget_entity_id).update(total_onetime_costs=total_onetime_cost,
-                                     total_recurring_costs=total_recurring_cost)
+    db(table.id == budget_entity_id).update(total_onetime_costs = total_onetime_cost,
+                                            total_recurring_costs = total_recurring_cost,
+                                            )
 
     # @todo: fix this
     #audit("update", module, "budget", record=budget, representation="html")

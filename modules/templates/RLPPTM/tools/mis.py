@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # Helper Script for Mass-Invitation of Participant Organisations
 #
 # RLPPTM Template Version 1.0
@@ -10,7 +8,7 @@
 import os
 import sys
 
-from s3 import s3_format_datetime
+from core import s3_format_datetime
 
 from templates.RLPPTM.config import SCHOOLS
 from templates.RLPPTM.helpers import InviteUserOrg

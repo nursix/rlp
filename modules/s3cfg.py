@@ -1,11 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Deployment Settings
 
-""" Deployment Settings
-
-    @requires: U{B{I{gluon}} <http://web2py.com>}
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -29,16 +25,17 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3Config",)
+__all__ = ("S3Config",
+           )
 
 from collections import OrderedDict
 
 from gluon import current, URL
 from gluon.storage import Storage
 
-from s3compat import basestring, INTEGER_TYPES
 from s3theme import FORMSTYLES
 
+# =============================================================================
 class S3Config(Storage):
     """
         Deployment Settings Helper Class
@@ -181,7 +178,6 @@ class S3Config(Storage):
         self.fire = Storage()
         # @ToDo: Move to self.ui
         self.frontpage = Storage()
-        self.frontpage.rss = []
         self.gis = Storage()
         # Allow templates to append rather than replace
         self.gis.countries = []
@@ -198,7 +194,6 @@ class S3Config(Storage):
         self.mobile = Storage()
         self.msg = Storage()
         self.org = Storage()
-        self.police = Storage()
         self.pr = Storage()
         self.proc = Storage()
         self.project = Storage()
@@ -213,7 +208,6 @@ class S3Config(Storage):
         self.tasks = Storage()
         self.transport = Storage()
         self.ui = Storage()
-        self.vulnerability = Storage()
         self.xforms = Storage()
 
         # Lazy property
@@ -485,7 +479,7 @@ class S3Config(Storage):
         else:
             return attr
 
-    def customise_home(self, module, alt_function):
+    def customise_home(self, module, alt_function=None):
         """
             Allow use of a Customised module Home page
             Fallback to cms_index if not configured
@@ -553,7 +547,7 @@ class S3Config(Storage):
     # Authentication settings
     def get_auth_hmac_key(self):
         """
-            salt to encrypt passwords - normally randomised during 1st run
+            Salt to encrypt passwords - normally randomised during 1st run
         """
         return self.auth.get("hmac_key", "akeytochange")
 
@@ -575,6 +569,14 @@ class S3Config(Storage):
             To set the Minimum Password Length
         """
         return self.auth.get("password_min_length", int(4))
+
+    def get_auth_profile_controller(self):
+        """
+            Which page to use for /default/person:
+            - pr (default)
+            - hrm
+        """
+        return self.auth.get("profile_controller")
 
     def get_auth_gmail_domains(self):
         """ List of domains which can use GMail SMTP for Authentication """
@@ -1007,6 +1009,7 @@ class S3Config(Storage):
         return self.auth.get("ignore_levels_for_presence", ("L0",))
     def get_auth_create_unknown_locations(self):
         return self.auth.get("create_unknown_locations", False)
+
     def get_security_archive_not_delete(self):
         return self.security.get("archive_not_delete", True)
     def get_security_audit_read(self):
@@ -1032,13 +1035,13 @@ class S3Config(Storage):
         """
             System Name - for the UI & Messaging
         """
-        return self.base.get("system_name", current.T("Sahana Eden Humanitarian Management Platform"))
+        return self.base.get("system_name", current.T("Eden ASP"))
 
     def get_system_name_short(self):
         """
             System Name (Short Version) - for the UI & Messaging
         """
-        return self.base.get("system_name_short", "Sahana")
+        return self.base.get("system_name_short", "Eden ASP")
 
     def get_base_debug(self):
         """
@@ -1050,8 +1053,20 @@ class S3Config(Storage):
         """
             Allow testing of Eden using EdenTest
         """
-
         return self.base.get("allow_testing", True)
+
+    def get_base_models(self):
+        """
+            Import path(s) for extension models (str or list|tuple of str)
+        """
+        return self.base.get("models")
+
+    def get_base_rest_controllers(self):
+        """
+            Re-routed RESTful CRUD controllers
+            - a dict {(controller, function): (prefix, name)}
+        """
+        return self.base.get("rest_controllers")
 
     def get_base_migrate(self):
         """ Whether to allow Web2Py to migrate the SQL database to the new structure """
@@ -1068,10 +1083,6 @@ class S3Config(Storage):
     def get_base_prepopulate_demo(self):
         """For demo sites, which additional options to add to the list """
         return self.base.get("prepopulate_demo", 0)
-
-    def get_base_guided_tour(self):
-        """ Whether the guided tours are enabled """
-        return self.base.get("guided_tour", self.has_module("tour"))
 
     def get_base_public_url(self):
         """
@@ -1955,7 +1966,7 @@ class S3Config(Storage):
             e.g. Apellido Paterno in Hispanic names
 
             Setting this means that auth_user.last_name matches with pr_person.middle_name
-            e.g. RMSAmericas
+            e.g. RMS
         """
         return self.__lazy("L10n", "mandatory_middlename", False)
 
@@ -1974,6 +1985,12 @@ class S3Config(Storage):
         return self.L10n.get("thousands_separator", " ")
     def get_L10n_thousands_grouping(self):
         return self.L10n.get("thousands_grouping", 3)
+
+    def get_L10n_translate_cap_area(self):
+        """
+            Whether to translate CAP Area names
+        """
+        return self.L10n.get("translate_cap_area", False)
 
     def get_L10n_translate_cms_series(self):
         """
@@ -2010,11 +2027,14 @@ class S3Config(Storage):
         """
         return self.L10n.get("translate_org_site", False)
 
-    def get_L10n_translate_cap_area(self):
+    def get_L10n_translate_supply_item(self):
         """
-            Whether to translate CAP Area names
+            Whether to translate Supply names:
+                - Catalogs
+                - Categories
+                - Items
         """
-        return self.L10n.get("translate_cap_area", False)
+        return self.L10n.get("translate_supply_item", False)
 
     def get_L10n_pootle_url(self):
         """ URL for Pootle server """
@@ -2063,21 +2083,6 @@ class S3Config(Storage):
         language = current.session.s3.language
         return self.__lazy("L10n", "pdf_export_font", self.fonts.get(language))
 
-    def get_pdf_excluded_fields(self, resourcename):
-        """
-            Optical Character Recognition (OCR)
-        """
-
-        excluded_fields = self.pdf.get("excluded_fields")
-        if excluded_fields is None:
-            excluded_fields = {"hms_hospital": ["hrm_human_resource",
-                                                ],
-                               "pr_group": ["pr_group_membership",
-                                            ],
-                               }
-
-        return excluded_fields.get(resourcename, [])
-
     def get_pdf_max_rows(self):
         """
             Maximum number of records in a single PDF table/list export
@@ -2107,7 +2112,7 @@ class S3Config(Storage):
         if callable(setting):
             # A custom formstyle defined in the template
             formstyle = setting
-        if setting in FORMSTYLES:
+        elif setting in FORMSTYLES:
             # One of the standard supported formstyles
             formstyle = FORMSTYLES[setting]
         else:
@@ -2149,7 +2154,7 @@ class S3Config(Storage):
 
         setting = self.ui.get("formstyle", "default")
 
-        if isinstance(setting, basestring):
+        if isinstance(setting, str):
             # Try to find the corresponding _inline formstyle
             inline_formstyle_name = "%s_inline" % setting
             formstyle = FORMSTYLES.get(inline_formstyle_name)
@@ -2169,6 +2174,13 @@ class S3Config(Storage):
         """
 
         return self.ui.get("datatables_dom", "fril<'dataTable_table't>pi")
+
+    def get_ui_datatables_pagelength(self):
+        """
+            Default (minimum) pagelength for datatables
+        """
+
+        return self.ui.get("datatables_pagelength", 25)
 
     def get_ui_datatables_initComplete(self):
         """
@@ -2444,7 +2456,7 @@ class S3Config(Storage):
                         {
                             "method": "datatable",  # widget method, either a
                                                     # name that resolves into
-                                                    # a S3Method, or a callable
+                                                    # a CRUDMethod, or a callable
                                                     # to render the widget
 
                             "filterable": True,     # Whether the widget can
@@ -2562,7 +2574,7 @@ class S3Config(Storage):
 
         layout = self.ui.get("inline_component_layout")
         if not layout:
-            from s3 import S3SQLSubFormLayout
+            from core import S3SQLSubFormLayout
             layout = S3SQLSubFormLayout()
         elif isinstance(layout, type):
             # Instantiate only now when it's actually requested
@@ -2581,7 +2593,7 @@ class S3Config(Storage):
 
     def get_ui_profile_header(self, r):
         """
-            What Header should be shown in the Profile page
+            What Header should be shown in Profile pages
         """
 
         #profile_header = self.__lazy("ui", "profile_header", None)
@@ -2601,7 +2613,7 @@ class S3Config(Storage):
                 comments = ""
             profile_header = DIV(H2(title),
                                  P(comments),
-                                 _class="profile-header",
+                                 _class = "profile-header",
                                  )
         return profile_header
 
@@ -2670,7 +2682,7 @@ class S3Config(Storage):
             link alert_id in cap module to message_id in message module
             The function can be of form msg_send_postprocess(message_id, **data),
             where message_id is the msg_message_id and
-            **data is the additional arguments to pass to s3msg.send_by_pe_id
+            **data is the additional arguments to pass to S3Msg.send_by_pe_id
         """
 
         return self.msg.get("send_postprocess")
@@ -2776,9 +2788,9 @@ class S3Config(Storage):
 
             The function may be of the form:
             custom_msg_notify_attachment(resource, data, meta_data), where
-            resource is the S3Resource, data: the data returned from
-            S3Resource.select and meta_data: the meta data for the notification
-            (see s3notify for the metadata)
+            resource is the CRUDResource, data: the data returned from
+            CRUDResource.select and meta_data: the meta data for the notification
+            (see S3Notifications for the metadata)
         """
 
         return self.msg.get("notify_attachment")
@@ -2786,13 +2798,13 @@ class S3Config(Storage):
     def get_msg_notify_send_data(self):
         """
             Custom function that returns additional arguments to pass to
-            s3msg.send_by_pe_id
+            S3Msg.send_by_pe_id
 
             The function should be of the form:
             custom_msg_notify_send_data(resource, data, meta_data), where
-            resource is the S3Resource, data: the data returned from
-            S3Resource.select and meta_data: the meta data for the notification
-            (see s3notify for the metadata)
+            resource is the CRUDResource, data: the data returned from
+            CRUDResource.select and meta_data: the meta data for the notification
+            (see S3Notifications for the metadata)
         """
 
         return self.msg.get("notify_send_data")
@@ -2873,25 +2885,6 @@ class S3Config(Storage):
     # =========================================================================
     # Sync
     #
-    def get_sync_mcb_resource_identifiers(self):
-        """
-            Resource (=data type) identifiers for synchronization with
-            Mariner CommandBridge, a dict {tablename:id}
-        """
-
-        return self.sync.get("mcb_resource_identifiers", {})
-
-    def get_sync_mcb_domain_identifiers(self):
-        """
-            Domain (of origin) identifiers for synchronization with
-            Mariner CommandBridge, a dict {domain: id} where
-            "domain" means the domain prefix of the record UUID
-            (e.g. uuid "wrike/IKY0192834" => domain "wrike"),
-            default domain is "sahana"
-        """
-
-        return self.sync.get("mcb_domain_identifiers", {})
-
     def get_sync_upload_filename(self):
         """
             Filename for upload via FTP Sync
@@ -2960,6 +2953,13 @@ class S3Config(Storage):
             User roles permitted to export beneficiary ID cards
         """
         return self.br.get("id_card_export_roles")
+
+    def get_br_case_global_default_org(self):
+        """
+            All cases belong to the global default organisation,
+            even if the user could create cases for other orgs
+        """
+        return self.br.get("case_global_default_org", False)
 
     def get_br_case_hide_default_org(self):
         """
@@ -3215,6 +3215,15 @@ class S3Config(Storage):
             Track effort (=hours spent) for assistance measures
         """
         return self.br.get("assistance_track_effort", True)
+
+    def get_br_assistance_offer_refno(self):
+        """
+            Use reference numbers in offers of assistance
+            False - do not use reference numbers
+            True - use reference numbers, manual input
+            "auto" - auto-generate reference numbers
+        """
+        return self.br.get("assistance_offer_refno", "auto")
 
     # -------------------------------------------------------------------------
     # CAP: Common Alerting Protocol
@@ -3737,6 +3746,12 @@ class S3Config(Storage):
         """
         return self.disease.get("treatment", False)
 
+    def get_disease_testing_report_by_demographic(self):
+        """
+            Testing report to be entered broken down by demographic
+        """
+        return self.disease.get("testing_report_by_demographic", False)
+
     # -------------------------------------------------------------------------
     # Doc Options
     #
@@ -4020,15 +4035,6 @@ class S3Config(Storage):
         """
         return self.get_dvr_response_themes_needs() and \
                self.__lazy("dvr", "response_activity_autolink", default=False)
-
-    # -------------------------------------------------------------------------
-    # Education
-    #
-    def get_edu_school_code_unique(self):
-        """
-            Validate for Unique School Codes
-        """
-        return self.edu.get("school_code_unique", False)
 
     # -------------------------------------------------------------------------
     # Events
@@ -4697,6 +4703,9 @@ class S3Config(Storage):
     def get_inv_collapse_tabs(self):
         return self.inv.get("collapse_tabs", True)
 
+    def get_inv_document_filing(self):
+        return self.inv.get("document_filing", False)
+
     def get_inv_facility_label(self):
         return self.inv.get("facility_label", "Warehouse")
 
@@ -4920,7 +4929,7 @@ class S3Config(Storage):
         """
         default_organisation = self.__lazy("org", "default_organisation", default=None)
         if default_organisation:
-            if not isinstance(default_organisation, INTEGER_TYPES):
+            if not isinstance(default_organisation, int):
                 # Check Session cache
                 default_organisation_id = current.session.s3.default_organisation_id
                 if default_organisation_id:
@@ -4949,7 +4958,7 @@ class S3Config(Storage):
         """
         default_site = self.org.get("default_site", None)
         if default_site:
-            if not isinstance(default_site, INTEGER_TYPES):
+            if not isinstance(default_site, int):
                 # Check Session cache
                 default_site_id = current.session.s3.default_site_id
                 if default_site_id:
@@ -5166,6 +5175,12 @@ class S3Config(Storage):
         """
         return self.org.get("site_last_contacted", False)
 
+    #def get_org_site_show_type(self):
+    #    """
+    #        Whether to show the Type of Sites in Represents
+    #    """
+    #    return self.org.get("site_show_type", True)
+
     def get_org_site_volunteers(self):
         """
             Whether volunteers can be assigned to Sites
@@ -5186,6 +5201,7 @@ class S3Config(Storage):
             Enables/Disables optional fields according to a user's Organisation
             - must specify either field or tablename/fieldname
                                            (e.g. for virtual fields)
+            @ToDo: Deprecate this (old way IFRC template did some things)
         """
 
         enabled = False
@@ -5231,16 +5247,6 @@ class S3Config(Storage):
             Whether Organisations, Offices & Facilities should show a Tags tab
         """
         return self.org.get("tags", False)
-
-    # -------------------------------------------------------------------------
-    # Police
-    #
-
-    def get_police_station_code_unique(self):
-        """
-            Whether Police Station code is unique
-        """
-        return self.police.get("police_station_unique", False)
 
     # -------------------------------------------------------------------------
     # Persons
@@ -5477,15 +5483,6 @@ class S3Config(Storage):
             setting = self.has_module("stats")
         return setting
 
-    def get_project_activity_items(self):
-        """
-            Use Items in Activities
-        """
-        setting = self.project.get("activity_items", None)
-        if setting is None:
-            setting = self.has_module("supply")
-        return setting
-
     def get_project_activity_sectors(self):
         """
             Use Sectors in Activities
@@ -5540,12 +5537,6 @@ class S3Config(Storage):
         """
         return self.project.get("demographics", False)
 
-    def get_project_details_tab(self):
-        """
-            Group Tabs on Projects into a single 'Details' page
-        """
-        return self.project.get("details_tab", False)
-
     def get_project_event_activities(self):
         """
             Link Activities to Events
@@ -5558,12 +5549,6 @@ class S3Config(Storage):
         """
         return self.project.get("event_projects", False)
 
-    def get_project_goals(self):
-        """
-            Use Goals in Projects
-        """
-        return self.project.get("goals", False)
-
     def get_project_hazards(self):
         """
             Use Hazards in DRR Projects
@@ -5574,35 +5559,6 @@ class S3Config(Storage):
             use_hazards = self.get_project_mode_drr()
 
         return use_hazards
-
-    def get_project_hfa(self):
-        """
-            Use HFA Priorities in DRR Projects
-        """
-        use_hfa = self.project.get("hfa")
-        if use_hfa is None:
-            # Default to True if mode_drr
-            use_hfa = self.get_project_mode_drr()
-
-        return use_hfa
-
-    def get_project_indicators(self):
-        """
-            Use Indicators in Projects
-        """
-        return self.project.get("indicators", False)
-
-    def get_project_indicator_criteria(self):
-        """
-            Use Indicator Criteria in Projects
-        """
-        return self.project.get("indicator_criteria", False)
-
-    def get_project_status_from_activities(self):
-        """
-            Use Activity Statuses to build Project Status (instead of Indicator Data)
-        """
-        return self.project.get("status_from_activities", False)
 
     #def get_project_locations_from_countries(self):
     #    """
@@ -5617,44 +5573,11 @@ class S3Config(Storage):
         """
         return self.project.get("milestones", False)
 
-    def get_project_outcomes(self):
-        """
-            Use Outcomes in Projects
-        """
-        return self.project.get("outcomes", False)
-
-    def get_project_outputs(self):
-        """
-            Use Outputs in Projects
-        """
-        return self.project.get("outputs", "inline")
-
-    def get_project_planning_ondelete(self):
-        """
-            Whether the Project Planning data should CASCADE ondelete or RESTRICT
-
-            NB This cannot be edited on the fly, or vary by context
-               It needs defining before the database is created.
-        """
-        return self.project.get("planning_ondelete", "CASCADE")
-
     def get_project_projects(self):
         """
             Link Activities & Tasks to Projects
         """
         return self.project.get("projects", False)
-
-    def get_project_programmes(self):
-        """
-            Use Programmes in Projects
-        """
-        return self.project.get("programmes", False)
-
-    def get_project_programme_budget(self):
-        """
-            Use Budgets in Programmes
-        """
-        return self.project.get("programme_budget", False)
 
     def get_project_sectors(self):
         """
@@ -5786,6 +5709,9 @@ class S3Config(Storage):
             Provide a Copy button for Requests?
         """
         return self.req.get("copyable", False)
+
+    #def get_req_document_filing(self):
+    #    return self.req.get("document_filing", False)
 
     def get_req_recurring(self):
         """
@@ -5942,6 +5868,15 @@ class S3Config(Storage):
         """
         return self.req.get("req_restrict_on_complete", False)
 
+    def get_req_order_item(self):
+        return self.req.get("order_item", False)
+
+    def get_req_workflow(self):
+        """
+            Whether to use Workflow for Requests
+        """
+        return self.req.get("workflow", False)
+
     # -------------------------------------------------------------------------
     # Supply
     #
@@ -5969,12 +5904,6 @@ class S3Config(Storage):
             - function(prefix, site_id, field)
         """
         return self.supply.get("shipping_code")
-
-    # -------------------------------------------------------------------------
-    # Vulnerability
-    #
-    def get_vulnerability_indicator_hierarchical(self):
-        return self.vulnerability.get("indicator_hierarchical", False)
 
     # -------------------------------------------------------------------------
     # Transport

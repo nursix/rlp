@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Situation Model
 
-""" Sahana Eden Situation Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,16 +25,16 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3SituationModel",
+__all__ = ("SituationModel",
            )
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 #from s3layouts import S3PopupLink
 
 # =============================================================================
-class S3SituationModel(S3Model):
+class SituationModel(DataModel):
     """
         Situation Super Entity & Presence tables for Trackable resources
     """

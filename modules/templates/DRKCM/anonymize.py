@@ -1,14 +1,10 @@
-# -*- coding: utf-8 -*-
-
 """
-    Anonymizer rules for DRKCM template
+    Anonymizer rules for DRKCM
 
-    @license: MIT
+    License: MIT
 """
 
 from gluon import current
-
-from s3compat import long
 
 # =============================================================================
 def drk_obscure_dob(record_id, field, value):
@@ -16,11 +12,13 @@ def drk_obscure_dob(record_id, field, value):
         Helper to obscure a date of birth; maps to the first day of
         the quarter, thus retaining the approximate age for statistics
 
-        @param record_id: the pr_address record ID
-        @param field: the location_id Field
-        @param value: the location_id
+        Args:
+            record_id: the pr_address record ID
+            field: the location_id Field
+            value: the location_id
 
-        @return: the new date
+        Returns:
+            the new date
     """
 
     if value:
@@ -36,7 +34,7 @@ def drk_person_anonymize():
     ANONYMOUS = "-"
 
     # Helper to produce an anonymous ID (pe_label)
-    anonymous_id = lambda record_id, f, v: "NN%06d" % long(record_id)
+    anonymous_id = lambda record_id, f, v: "NN%06d" % int(record_id)
 
     # General rule for attachments
     documents = ("doc_document", {"key": "doc_id",

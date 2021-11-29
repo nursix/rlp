@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Security Model
 
-""" Sahana Eden Security Model
-
-    @copyright: 2012-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2012-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -33,11 +31,11 @@ __all__ = ("SecurityZonesModel",
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 from s3layouts import S3PopupLink
 
 # =============================================================================
-class SecurityZonesModel(S3Model):
+class SecurityZonesModel(DataModel):
     """ Model for security zones """
 
     names = ("security_level",
@@ -298,7 +296,7 @@ class SecurityZonesModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
     # -----------------------------------------------------------------------------
     @staticmethod
@@ -337,7 +335,7 @@ class SecurityZonesModel(S3Model):
         return vals
 
 # =============================================================================
-class SecuritySeizedItemsModel(S3Model):
+class SecuritySeizedItemsModel(DataModel):
     """
         Model for the tracking of seized items (e.g. in connection
         with security procedures at shelters, borders or transport
@@ -491,7 +489,7 @@ class SecuritySeizedItemsModel(S3Model):
                      Field("status",
                            default = "DEP",
                            requires = IS_IN_SET(seized_item_status, zero=None),
-                           represent = S3Represent(options=seized_item_status),
+                           represent = represent_option(seized_item_status),
                            ),
                      depository_id(ondelete="SET NULL",
                                    ),

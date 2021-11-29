@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Patient Model
 
-""" Sahana Eden Patient Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,15 +25,15 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3PatientModel",)
+__all__ = ("PatientModel",)
 
 from gluon import *
 from gluon.storage import Storage
 
-from ..s3 import *
+from ..core import *
 
 # =============================================================================
-class S3PatientModel(S3Model):
+class PatientModel(DataModel):
     """
     """
 
@@ -230,7 +228,7 @@ class S3PatientModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # =============================================================================
 class patient_PatientRepresent(S3Represent):
@@ -242,8 +240,9 @@ class patient_PatientRepresent(S3Represent):
         """
             Custom lookup method for Patient names
 
-            @param key: Key for patient table
-            @param values: Patient IDs
+            Args:
+                key: Key for patient table
+                values: Patient IDs
         """
 
         table = self.table
@@ -273,7 +272,8 @@ class patient_PatientRepresent(S3Represent):
         """
             Represent a row for a particular patient
 
-            @param row: patient_patient Row
+            Args:
+                row: patient_patient Row
         """
 
         try:

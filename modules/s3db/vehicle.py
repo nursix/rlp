@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Vehicle Model
 
-""" Sahana Eden Vehicle Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,15 +25,15 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3VehicleModel",)
+__all__ = ("VehicleModel",)
 
 from gluon import *
 from gluon.storage import Storage
 
-from ..s3 import *
+from ..core import *
 
 # =============================================================================
-class S3VehicleModel(S3Model):
+class VehicleModel(DataModel):
     """
         Vehicle Management Functionality
 
@@ -241,11 +239,7 @@ class S3VehicleModel(S3Model):
     def defaults():
         """ Return safe defaults for names in case the model is disabled """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return {"vehicle_vehicle_id": lambda **attr: dummy("vehicle_id"),
+        return {"vehicle_vehicle_id": S3ReusableField.dummy("vehicle_id"),
                 }
 
 # END =========================================================================

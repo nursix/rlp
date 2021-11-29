@@ -27,19 +27,19 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3MembersModel",
-           "S3MemberProgrammeModel",
+__all__ = ("MemberModel",
+           "MemberProgrammeModel",
            "member_rheader"
            )
 
 import datetime
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 from s3layouts import S3PopupLink
 
 # =============================================================================
-class S3MembersModel(S3Model):
+class MemberModel(DataModel):
     """
     """
 
@@ -423,7 +423,8 @@ class S3MembersModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return dict(member_membership_id = membership_id)
+        return {"member_membership_id": membership_id,
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -571,7 +572,7 @@ class S3MembersModel(S3Model):
         record.update_record(**data)
 
 # =============================================================================
-class S3MemberProgrammeModel(S3Model):
+class MemberProgrammeModel(DataModel):
     """ Member Programmes Model """
 
     names = ("member_membership_programme",
@@ -591,7 +592,7 @@ class S3MemberProgrammeModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # =============================================================================
 def member_rheader(r, tabs=None):

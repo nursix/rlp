@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Shelter (Camp) Registry, model
 
-""" Shelter (Camp) Registry, model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -44,14 +42,15 @@ import json
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
+from s3dal import Row
 from s3layouts import S3PopupLink
 
 NIGHT = 1
 DAY_AND_NIGHT = 2
 
 # =============================================================================
-class CRShelterModel(S3Model):
+class CRShelterModel(DataModel):
 
     names = ("cr_shelter_type",
              "cr_shelter",
@@ -188,7 +187,7 @@ class CRShelterModel(S3Model):
                            # between grammatical moods or genders etc - so
                            # adding a context-comment for T() here to clarify
                            # which "Open" we mean (will not be rendered):
-                           2 : T("Open##the_shelter_is"),
+                           2 : T("Open##status"),
                            }
 
         day_and_night = settings.get_cr_day_and_night()
@@ -247,14 +246,35 @@ class CRShelterModel(S3Model):
                      shelter_environment_id(readable = False,
                                             writable = False,),# Enable in template if-required
                      location_id(),
+                     self.pr_person_id(
+                        label = T("Contact Person / Camp Owner"),
+                        ),
+                     # Alternative for person_id: simple name field
+                     Field("contact_name",
+                           label = T("Contact Name"),
+                           represent = lambda v, row=None: v if v else "-",
+                           readable = False,
+                           writable = False,
+                           ),
                      Field("phone",
                            label = T("Phone"),
                            requires = IS_EMPTY_OR(IS_PHONE_NUMBER_MULTI()),
+                           represent = lambda v, row=None: v if v else "-",
                            ),
-                     Field("email", "string",
+                     Field("email",
                            label = T("Email"),
+                           requires = IS_EMPTY_OR(IS_EMAIL()),
+                           represent = lambda v, row=None: v if v else "-",
                            ),
-                     self.pr_person_id(label = T("Contact Person / Camp Owner")),
+                     Field("website",
+                           label = T("Website"),
+                           represent = s3_url_represent,
+                           requires = IS_EMPTY_OR(IS_URL(allowed_schemes = ["http", "https", None],
+                                                         prepend_scheme = "http",
+                                                         )),
+                           readable = False,
+                           writable = False,
+                           ),
                      #Static field
                      Field("population", "integer",
                            label = T("Estimated Population"),
@@ -331,7 +351,7 @@ class CRShelterModel(S3Model):
                      Field("status", "integer",
                            label = T("Status"),
                            default = 2, # Open
-                           represent = S3Represent(options = cr_shelter_opts),
+                           represent = represent_option(cr_shelter_opts),
                            requires = IS_EMPTY_OR(
                                        IS_IN_SET(cr_shelter_opts)
                                        ),
@@ -495,25 +515,25 @@ class CRShelterModel(S3Model):
                   )
 
         # Custom method to assign HRs
-        set_method("cr", "shelter",
+        set_method("cr_shelter",
                    method = "assign",
                    action = self.hrm_AssignMethod(component="human_resource_site"),
                    )
 
         # Check-in method
-        set_method("cr", "shelter",
+        set_method("cr_shelter",
                    method="check-in",
                    action = self.org_SiteCheckInMethod,
                    )
 
         # Notification-dispatch method
-        set_method("cr", "shelter",
+        set_method("cr_shelter",
                    method = "dispatch",
                    action = cr_notification_dispatcher,
                    )
 
         # Shelter Inspection method
-        set_method("cr", "shelter",
+        set_method("cr_shelter",
                    method = "inspection",
                    action = CRShelterInspection,
                    )
@@ -580,7 +600,7 @@ class CRShelterModel(S3Model):
                      s3_date(),
                      Field("status", "integer",
                            label = T("Status"),
-                           represent = S3Represent(options = cr_shelter_opts),
+                           represent = represent_option(cr_shelter_opts),
                            requires = IS_EMPTY_OR(
                                        IS_IN_SET(cr_shelter_opts)
                                        ),
@@ -869,11 +889,7 @@ class CRShelterModel(S3Model):
             Return safe defaults in case the model has been deactivated.
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return {"cr_shelter_id": lambda **attr: dummy("shelter_id"),
+        return {"cr_shelter_id": S3ReusableField.dummy("shelter_id"),
                 }
 
     # -------------------------------------------------------------------------
@@ -1013,7 +1029,7 @@ class CRShelterModel(S3Model):
         return current.messages["NONE"]
 
 # =============================================================================
-class CRShelterServiceModel(S3Model):
+class CRShelterServiceModel(DataModel):
     """ Model for Shelter Services """
 
     names = ("cr_shelter_service",
@@ -1110,16 +1126,11 @@ class CRShelterServiceModel(S3Model):
     #def defaults():
     #    """ Safe defaults for names in case the module is disabled """
 
-    #    dummy = S3ReusableField("dummy_id", "integer",
-    #                            readable = False,
-    #                            writable = False,
-    #                            )
-
-    #    return {"cr_shelter_service_id":  lambda **attr: dummy("service_id"),
+    #    return {"cr_shelter_service_id":  S3ReusableField.dummy("service_id"),
     #            }
 
 # =============================================================================
-class CRShelterInspectionModel(S3Model):
+class CRShelterInspectionModel(DataModel):
     """ Model for Shelter / Housing Unit Flags """
 
     names = ("cr_shelter_flag",
@@ -1174,7 +1185,7 @@ class CRShelterInspectionModel(S3Model):
                      Field("task_priority", "integer",
                            default = 3,
                            label = T("Priority"),
-                           represent = S3Represent(options=task_priority_opts),
+                           represent = represent_option(task_priority_opts),
                            requires = IS_IN_SET(task_priority_opts,
                                                 zero = None,
                                                 ),
@@ -1401,12 +1412,7 @@ class CRShelterInspectionModel(S3Model):
     def defaults():
         """ Safe defaults for names in case the module is disabled """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False,
-                                )
-
-        return {"cr_shelter_flag_id":  lambda **attr: dummy("flag_id"),
+        return {"cr_shelter_flag_id":  S3ReusableField.dummy("flag_id"),
                 }
 
     # -------------------------------------------------------------------------
@@ -1592,7 +1598,7 @@ class CRShelterInspectionModel(S3Model):
             link.update_record(task_id = None)
 
 # =============================================================================
-class CRShelterRegistrationModel(S3Model):
+class CRShelterRegistrationModel(DataModel):
 
     names = ("cr_shelter_allocation",
              "cr_shelter_registration",
@@ -1635,8 +1641,8 @@ class CRShelterRegistrationModel(S3Model):
                      Field("status", "integer",
                            default = 3,
                            label = T("Status"),
+                           represent = represent_option(allocation_status_opts),
                            requires = IS_IN_SET(allocation_status_opts),
-                           represent = S3Represent(options = allocation_status_opts),
                            ),
                      Field("group_size_day", "integer",
                            default = 0,
@@ -1710,8 +1716,7 @@ class CRShelterRegistrationModel(S3Model):
                      Field("day_or_night", "integer",
                            default = DAY_AND_NIGHT,
                            label = T("Presence in the shelter"),
-                           represent = S3Represent(options=cr_day_or_night_opts
-                                                   ),
+                           represent = represent_option(cr_day_or_night_opts),
                            requires = IS_IN_SET(cr_day_or_night_opts,
                                                 zero=None
                                                 ),
@@ -1748,7 +1753,7 @@ class CRShelterRegistrationModel(S3Model):
                       )
 
         # Custom Methods
-        self.set_method("cr", "shelter_registration",
+        self.set_method("cr_shelter_registration",
                         method = "assign",
                         action = cr_AssignUnit())
 
@@ -1834,7 +1839,8 @@ class CRShelterRegistrationModel(S3Model):
             Registration onaccept: track status changes, update
             shelter population
 
-            @param form: the FORM (also accepts Row)
+            Args:
+                form: the FORM (also accepts Row)
         """
 
         try:
@@ -1949,9 +1955,10 @@ class CRShelterRegistrationModel(S3Model):
         """
             Update the shelter population, onaccept
 
-            @param form: the FORM
-            @param tablename: the table name
-            @param unit_id: the shelter unit ID (to warn if full)
+            Args:
+                form: the FORM
+                tablename: the table name
+                unit_id: the shelter unit ID (to warn if full)
         """
 
         db = current.db
@@ -2088,7 +2095,8 @@ def cr_update_housing_unit_population(shelter_id):
         To be called onaccept/ondelete of cr_shelter_registration and
         cr_shelter_allocation.
 
-        @param shelter_id: the Shelter ID
+        Args:
+            shelter_id: the Shelter ID
     """
 
     db = current.db
@@ -2217,7 +2225,8 @@ def cr_update_shelter_population(shelter_id):
         called onaccept/ondelete of cr_shelter_registration and
         cr_shelter_allocation.
 
-        @param shelter_id: the shelter record ID
+        Args:
+            shelter_id: the shelter record ID
     """
 
     db = current.db
@@ -2308,8 +2317,9 @@ def cr_check_population_availability(unit_id, table):
         Evaluate the population capacity availability.
         Show a non blocking warning in case the people in the shelter/housing unit are more than its capacity
 
-        @param unit_id: the shelter ID / housing unit ID
-        @param table: related tablename (cr_shelter or cr_shelter_housing_unit)
+        Args:
+            unit_id: the shelter ID / housing unit ID
+            table: related tablename (cr_shelter or cr_shelter_housing_unit)
     """
 
     T = current.T
@@ -2376,7 +2386,8 @@ def cr_update_capacity_from_housing_units(shelter_id):
         To be called onaccept/ondelete of cr_shelter_registration and
         cr_shelter_allocation.
 
-        @param shelter_id: the shelter record ID
+        Args:
+            shelter_id: the shelter record ID
     """
 
     db = current.db
@@ -2490,10 +2501,11 @@ class cr_AssignUnit(S3CRUD):
     # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Entry point for REST API
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller arguments
+            Args:
+                r: the CRUDRequest
+                attr: controller arguments
         """
 
         try:
@@ -2502,7 +2514,7 @@ class cr_AssignUnit(S3CRUD):
             r.error(400, current.messages.BAD_REQUEST)
 
         self.settings = current.response.s3.crud
-        sqlform = self._config("crud_form")
+        sqlform = self.resource.get_config("crud_form")
         self.sqlform = sqlform if sqlform else S3SQLDefaultForm()
         self.data = None
 
@@ -2532,9 +2544,8 @@ class ShelterInspectionFlagRepresent(S3Represent):
 
     def __init__(self, show_link=False):
         """
-            Constructor
-
-            @param show_link: represent as link to the shelter inspection
+            Args:
+                show_link: represent as link to the shelter inspection
         """
 
         super(ShelterInspectionFlagRepresent, self).__init__(
@@ -2547,9 +2558,10 @@ class ShelterInspectionFlagRepresent(S3Represent):
         """
             Link inspection flag representations to the inspection record
 
-            @param k: the inspection flag ID
-            @param v: the representation
-            @param row: the row from lookup_rows
+            Args:
+                k: the inspection flag ID
+                v: the representation
+                row: the row from lookup_rows
         """
 
         if row:
@@ -2567,7 +2579,8 @@ class ShelterInspectionFlagRepresent(S3Represent):
         """
             Represent a Row
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         details = {"unit": row.cr_shelter_unit.name,
@@ -2582,9 +2595,10 @@ class ShelterInspectionFlagRepresent(S3Represent):
         """
             Lookup all rows referenced by values.
 
-            @param key: the key Field
-            @param values: the values
-            @param fields: the fields to retrieve
+            Args:
+                key: the key Field
+                values: the values
+                fields: the fields to retrieve
         """
 
         s3db = current.s3db
@@ -2621,9 +2635,8 @@ class ShelterInspectionRepresent(S3Represent):
 
     def __init__(self, show_link=False):
         """
-            Constructor
-
-            @param show_link: represent as link to the shelter inspection
+            Args:
+                show_link: represent as link to the shelter inspection
         """
 
         super(ShelterInspectionRepresent, self).__init__(
@@ -2636,9 +2649,10 @@ class ShelterInspectionRepresent(S3Represent):
         """
             Link inspection flag representations to the inspection record
 
-            @param k: the inspection flag ID
-            @param v: the representation
-            @param row: the row from lookup_rows
+            Args:
+                k: the inspection flag ID
+                v: the representation
+                row: the row from lookup_rows
         """
 
         if row:
@@ -2656,7 +2670,8 @@ class ShelterInspectionRepresent(S3Represent):
         """
             Represent a Row
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         details = {"unit": row.cr_shelter_unit.name,
@@ -2670,9 +2685,10 @@ class ShelterInspectionRepresent(S3Represent):
         """
             Lookup all rows referenced by values.
 
-            @param key: the key Field
-            @param values: the values
-            @param fields: the fields to retrieve
+            Args:
+                key: the key Field
+                values: the values
+                fields: the fields to retrieve
         """
 
         s3db = current.s3db
@@ -2698,7 +2714,7 @@ class ShelterInspectionRepresent(S3Represent):
         return rows
 
 # =============================================================================
-class CRShelterInspection(S3Method):
+class CRShelterInspection(CRUDMethod):
     """
         Mobile-optimized UI for shelter inspection
     """
@@ -2708,8 +2724,9 @@ class CRShelterInspection(S3Method):
         """
             Main entry point for REST interface.
 
-            @param r: the S3Request instance
-            @param attr: controller parameters
+            Args:
+                r: the CRUDRequest instance
+                attr: controller parameters
         """
 
         if not self.permitted():
@@ -2738,7 +2755,7 @@ class CRShelterInspection(S3Method):
     # -------------------------------------------------------------------------
     def permitted(self):
         """
-            @todo: docstring
+            TODO docstring
         """
 
         # @todo: implement
@@ -2749,8 +2766,9 @@ class CRShelterInspection(S3Method):
         """
             Generate the form
 
-            @param r: the S3Request instance
-            @param attr: controller parameters
+            Args:
+                r: the CRUDRequest instance
+                attr: controller parameters
         """
 
         T = current.T
@@ -2845,8 +2863,9 @@ class CRShelterInspection(S3Method):
         """
             Ajax-registration of shelter inspection
 
-            @param r: the S3Request instance
-            @param attr: controller parameters
+            Args:
+                r: the CRUDRequest instance
+                attr: controller parameters
         """
 
         T = current.T
@@ -2955,8 +2974,9 @@ class CRShelterInspection(S3Method):
             Helper function to inject static JS and instantiate
             the shelterInspection widget
 
-            @param widget_id: the node ID where to instantiate the widget
-            @param options: dict of widget options (JSON-serializable)
+            Args:
+                widget_id: the node ID where to instantiate the widget
+                options: dict of widget options (JSON-serializable)
         """
 
         s3 = current.response.s3
@@ -2983,7 +3003,8 @@ def cr_resolve_shelter_flags(task_id):
         If a task is set to an inactive status, then mark all linked
         shelter inspection flags as resolved
 
-        @param task_id: the task record ID
+        Args:
+            task_id: the task record ID
     """
 
     db = current.db

@@ -1,20 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Procurement Model
 
-""" Sahana Eden Procurement Model
-
-        A module to handle Procurement
-
-        Currently handles
-            Planned Procurements
-            Purchase Orders (PO)
-
-        @ToDo: Extend to
-            Purchase Requests (PR)
-            Requests for Quotation (RFQ)
-            Competitive Bid Analysis (CBA)
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -38,17 +25,17 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3ProcurementPlansModel",
-           "S3PurchaseOrdersModel",
+__all__ = ("PROCProcurementPlansModel",
+           "PROCPurchaseOrdersModel",
            "proc_rheader"
            )
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 
 # =============================================================================
-class S3ProcurementPlansModel(S3Model):
+class PROCProcurementPlansModel(DataModel):
     """
         Procurement Plans
 
@@ -109,7 +96,7 @@ class S3ProcurementPlansModel(S3Model):
                      self.org_organisation_id(label = T("Supplier")),
                      Field("shipping", "integer",
                            requires = IS_EMPTY_OR(IS_IN_SET(proc_shipping_opts)),
-                           represent = S3Represent(options = proc_shipping_opts),
+                           represent = represent_option(proc_shipping_opts),
                            label = T("Shipping Method"),
                            default = 0,
                            ),
@@ -244,7 +231,7 @@ class S3ProcurementPlansModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -272,11 +259,12 @@ class S3ProcurementPlansModel(S3Model):
             return current.messages.UNKNOWN_OPT
 
 # =============================================================================
-class S3PurchaseOrdersModel(S3Model):
+class PROCPurchaseOrdersModel(DataModel):
     """
         Purchase Orders (PO)
 
         @ToDo: Link to inv_send
+        @ToDo: Link to req_req
     """
 
     names = ("proc_order",
@@ -483,7 +471,17 @@ class S3PurchaseOrdersModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return {"proc_order_id": order_id,
+                }
+
+    # -------------------------------------------------------------------------
+    def defaults(self):
+        """
+            Safe defaults for model-global names in case module is disabled
+        """
+
+        return {"proc_order_id": S3ReusableField.dummy("order_id"),
+                }
 
     # -------------------------------------------------------------------------
     @staticmethod

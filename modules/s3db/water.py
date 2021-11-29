@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Water Model
 
-""" Sahana Eden Water Model
-
-    @copyright: 2011-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2011-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,15 +25,15 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3WaterModel",)
+__all__ = ("WaterModel",)
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 from s3layouts import S3PopupLink
 
 # =============================================================================
-class S3WaterModel(S3Model):
+class WaterModel(DataModel):
     """
         Water Sources
     """
@@ -283,6 +281,6 @@ class S3WaterModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # END =========================================================================

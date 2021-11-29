@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+"""
+    Custom Controllers for DRKCM
+
+    License: MIT
+"""
 
 import json
 
@@ -8,7 +12,7 @@ from gluon import current, redirect
 from gluon.html import *
 from gluon.storage import Storage
 
-from s3 import FS, S3CustomController
+from core import FS, S3CRUD, S3CustomController
 from s3theme import formstyle_foundation_inline
 
 THEME = "DRK"
@@ -64,7 +68,7 @@ class index(S3CustomController):
                             requires=IS_NOT_EMPTY(),
                             ),
                       ]
-            from s3 import s3_mark_required
+            from core import s3_mark_required
             labels, required = s3_mark_required(fields)
             s3.has_required = required
 
@@ -250,7 +254,6 @@ class userstats(S3CustomController):
     """
 
     def __init__(self):
-        """ Constructor """
 
         super(userstats, self).__init__()
 
@@ -266,18 +269,18 @@ class userstats(S3CustomController):
         if not auth.s3_has_role("ORG_GROUP_ADMIN"):
             auth.permission.fail()
 
-        from s3 import S3CRUD, s3_get_extension, s3_request
+        from core import S3CRUD, s3_get_extension, crud_request
 
         request = current.request
         args = request.args
 
-        # Create an S3Request
-        r = s3_request("org", "organisation",
-                       c = "default",
-                       f = "index/%s" % args[0],
-                       args = args[1:],
-                       extension = s3_get_extension(request),
-                       )
+        # Create an CRUDRequest
+        r = crud_request("org", "organisation",
+                         c = "default",
+                         f = "index/%s" % args[0],
+                         args = args[1:],
+                         extension = s3_get_extension(request),
+                         )
 
         # Filter to root organisations
         resource = r.resource
@@ -308,7 +311,7 @@ class userstats(S3CustomController):
                        )
 
         # Configure form
-        from s3 import S3SQLCustomForm, S3SQLVirtualField
+        from core import S3SQLCustomForm, S3SQLVirtualField
         crud_form = S3SQLCustomForm("name",
                                     S3SQLVirtualField("total_accounts",
                                                       label = TOTAL,
@@ -340,7 +343,7 @@ class userstats(S3CustomController):
             output["title"] = T("User Statistics")
 
             # URL to open the resource
-            open_url = resource.crud._linkto(r, update=False)("[id]")
+            open_url = S3CRUD._linkto(r, update=False)("[id]")
 
             # Add action button for open
             action_buttons = S3CRUD.action_buttons
@@ -358,11 +361,14 @@ class userstats(S3CustomController):
         """
             Show the current date in the output
 
-            @param r: the S3Request
-            @returns: the page header (rheader)
+            Args:
+                r: the CRUDRequest
+
+            Returns:
+                the page header (rheader)
         """
 
-        from s3 import S3DateTime
+        from core import S3DateTime
         today = S3DateTime.datetime_represent(r.utcnow, utc=True)
 
         return P("%s: %s" % (current.T("Date"), today))
@@ -464,7 +470,8 @@ class userstats(S3CustomController):
             Field method to return the total number of user accounts
             for the organisation
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         if hasattr(row, "org_organisation"):
@@ -479,7 +486,8 @@ class userstats(S3CustomController):
             Field method to return the number of active user accounts
             for the organisation
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         if hasattr(row, "org_organisation"):
@@ -498,7 +506,8 @@ class userstats(S3CustomController):
             Field method to return the number of disabled user accounts
             for the organisation
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         if hasattr(row, "org_organisation"):
@@ -514,7 +523,8 @@ class userstats(S3CustomController):
             organisation which have been used over the past 30 days
             (useful to verify the number of active accounts)
 
-            @param row: the Row
+            Args:
+                row: the Row
         """
 
         if hasattr(row, "org_organisation"):

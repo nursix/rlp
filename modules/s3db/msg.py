@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Messaging Model
 
-""" Sahana Eden Messaging Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,36 +25,36 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3ChannelModel",
-           "S3MessageModel",
-           "S3MessageAttachmentModel",
-           "S3MessageContactModel",
-           "S3MessageTagModel",
-           "S3EmailModel",
-           "S3FacebookModel",
-           "S3MCommonsModel",
-           "S3GCMModel",
-           "S3ParsingModel",
-           "S3RSSModel",
-           "S3SMSModel",
-           "S3SMSOutboundModel",
-           "S3TropoModel",
-           "S3TwilioModel",
-           "S3TwitterModel",
-           "S3TwitterSearchModel",
-           "S3XFormsModel",
-           "S3BaseStationModel",
+__all__ = ("MsgChannelModel",
+           "MsgMessageModel",
+           "MsgMessageAttachmentModel",
+           "MsgMessageContactModel",
+           "MsgMessageTagModel",
+           "MsgEmailModel",
+           "MsgFacebookModel",
+           "MsgMCommonsModel",
+           "MsgGCMModel",
+           "MsgParsingModel",
+           "MsgRSSModel",
+           "MsgSMSModel",
+           "MsgSMSOutboundModel",
+           "MsgTropoModel",
+           "MsgTwilioModel",
+           "MsgTwitterModel",
+           "MsgTwitterSearchModel",
+           "MsgXFormsModel",
+           "MsgBaseStationModel",
            )
 
 from gluon import *
 from gluon.storage import Storage
-from ..s3 import *
+from ..core import *
 
 # Compact JSON encoding
 SEPARATORS = (",", ":")
 
 # =============================================================================
-class S3ChannelModel(S3Model):
+class MsgChannelModel(DataModel):
     """
         Messaging Channels
         - all Inbound & Outbound channels for messages are instances of this
@@ -180,7 +178,7 @@ class S3ChannelModel(S3Model):
             - Schedule a Poll for new messages
             - Enable all associated Parsers
 
-            CLI API for shell scripts & to be called by S3Method
+            CLI API for shell scripts & to be called by CRUDMethod
         """
 
         db = current.db
@@ -231,7 +229,7 @@ class S3ChannelModel(S3Model):
             Enable a Channel
             - Schedule a Poll for new messages
 
-            S3Method for interactive requests
+            CRUD m´ethod for interactive requests
         """
 
         tablename = r.tablename
@@ -248,7 +246,7 @@ class S3ChannelModel(S3Model):
             - Remove schedule for Polling for new messages
             - Disable all associated Parsers
 
-            CLI API for shell scripts & to be called by S3Method
+            CLI API for shell scripts & to be called by CRUDMethod
         """
 
         db = current.db
@@ -293,7 +291,7 @@ class S3ChannelModel(S3Model):
             Disable a Channel
             - Remove schedule for Polling for new messages
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         tablename = r.tablename
@@ -332,7 +330,7 @@ class S3ChannelModel(S3Model):
         """
             Poll a Channel for new messages
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         tablename = r.tablename
@@ -356,7 +354,7 @@ class S3ChannelModel(S3Model):
         redirect(URL(f=fn))
 
 # =============================================================================
-class S3MessageModel(S3Model):
+class MsgMessageModel(DataModel):
     """
         Messages
     """
@@ -533,15 +531,11 @@ class S3MessageModel(S3Model):
             Return safe defaults in case the model has been deactivated.
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return {"msg_message_id": lambda **attr: dummy("message_id"),
+        return {"msg_message_id": S3ReusableField.dummy("message_id"),
                 }
 
 # =============================================================================
-class S3MessageAttachmentModel(S3Model):
+class MsgMessageAttachmentModel(DataModel):
     """
         Message Attachments
         - link table between msg_message & doc_document
@@ -563,10 +557,10 @@ class S3MessageAttachmentModel(S3Model):
 
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3MessageContactModel(S3Model):
+class MsgMessageContactModel(DataModel):
     """
         Contact Form
     """
@@ -619,14 +613,14 @@ class S3MessageContactModel(S3Model):
                           #Field("priority", "integer",
                           #      default = 1,
                           #      label = T("Priority"),
-                          #      represent = S3Represent(options = priority_opts),
+                          #      represent = represent_option(priority_opts),
                           #      requires = IS_IN_SET(priority_opts,
                           #                           zero = None),
                           #      ),
                           #Field("status", "integer",
                           #      default = 3,
                           #      label = T("Status"),
-                          #      represent = S3Represent(options = status_opts),
+                          #      represent = represent_option(status_opts),
                           #      requires = IS_IN_SET(status_opts,
                           #                           zero = None),
                           #      ),
@@ -659,10 +653,10 @@ class S3MessageContactModel(S3Model):
             msg_list_empty=T("No Contacts currently registered"))
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3MessageTagModel(S3Model):
+class MsgMessageTagModel(DataModel):
     """
         Message Tags
     """
@@ -703,10 +697,10 @@ class S3MessageTagModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EmailModel(S3ChannelModel):
+class MsgEmailModel(MsgChannelModel):
     """
         Email
             InBound Channels
@@ -768,15 +762,15 @@ class S3EmailModel(S3ChannelModel):
                   super_entity = "msg_channel",
                   )
 
-        set_method("msg", "email_channel",
+        set_method("msg_email_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "email_channel",
+        set_method("msg_email_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        set_method("msg", "email_channel",
+        set_method("msg_email_channel",
                    method = "poll",
                    action = self.msg_channel_poll)
 
@@ -837,10 +831,10 @@ class S3EmailModel(S3ChannelModel):
                             )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3FacebookModel(S3ChannelModel):
+class MsgFacebookModel(MsgChannelModel):
     """
         Facebook
             Channels
@@ -904,15 +898,15 @@ class S3FacebookModel(S3ChannelModel):
                   super_entity = "msg_channel",
                   )
 
-        set_method("msg", "facebook_channel",
+        set_method("msg_facebook_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "facebook_channel",
+        set_method("msg_facebook_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        #set_method("msg", "facebook_channel",
+        #set_method("msg_facebook_channel",
         #           method = "poll",
         #           action = self.msg_channel_poll)
 
@@ -963,15 +957,15 @@ class S3FacebookModel(S3ChannelModel):
                 }
 
     # -------------------------------------------------------------------------
-    @staticmethod
-    def msg_facebook_channel_onaccept(form):
+    @classmethod
+    def msg_facebook_channel_onaccept(cls, form):
 
         if form.vars.login:
             # Ensure only a single account used for Login
             current.db(current.s3db.msg_facebook_channel.id != form.vars.id).update(login = False)
 
         # Normal onaccept processing
-        S3ChannelModel.channel_onaccept(form)
+        cls.channel_onaccept(form)
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -987,7 +981,7 @@ class S3FacebookModel(S3ChannelModel):
         return c
 
 # =============================================================================
-class S3MCommonsModel(S3ChannelModel):
+class MsgMCommonsModel(MsgChannelModel):
     """
         Mobile Commons Inbound SMS Settings
         - Outbound can use Web API
@@ -1041,23 +1035,23 @@ class S3MCommonsModel(S3ChannelModel):
                        super_entity = "msg_channel",
                        )
 
-        set_method("msg", "mcommons_channel",
+        set_method("msg_mcommons_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "mcommons_channel",
+        set_method("msg_mcommons_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        set_method("msg", "mcommons_channel",
+        set_method("msg_mcommons_channel",
                    method = "poll",
                    action = self.msg_channel_poll)
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3GCMModel(S3ChannelModel):
+class MsgGCMModel(MsgChannelModel):
     """
         Google Cloud Messaging
             Channels
@@ -1103,34 +1097,34 @@ class S3GCMModel(S3ChannelModel):
                        super_entity = "msg_channel",
                        )
 
-        set_method("msg", "gcm_channel",
+        set_method("msg_gcm_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "gcm_channel",
+        set_method("msg_gcm_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        #set_method("msg", "gcm_channel",
+        #set_method("msg_gcm_channel",
         #           method = "poll",
         #           action = self.msg_channel_poll)
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
-    @staticmethod
-    def msg_gcm_channel_onaccept(form):
+    @classmethod
+    def msg_gcm_channel_onaccept(cls, form):
 
         if form.vars.enabled:
             # Ensure only a single account enabled
             current.db(current.s3db.msg_gcm_channel.id != form.vars.id).update(enabled = False)
 
         # Normal onaccept processing
-        S3ChannelModel.channel_onaccept(form)
+        cls.channel_onaccept(form)
 
 # =============================================================================
-class S3ParsingModel(S3Model):
+class MsgParsingModel(DataModel):
     """
         Message Parsing Model
     """
@@ -1178,15 +1172,15 @@ class S3ParsingModel(S3Model):
                        onaccept = self.msg_parser_onaccept,
                        )
 
-        set_method("msg", "parser",
+        set_method("msg_parser",
                    method = "enable",
                    action = self.parser_enable_interactive)
 
-        set_method("msg", "parser",
+        set_method("msg_parser",
                    method = "disable",
                    action = self.parser_disable_interactive)
 
-        set_method("msg", "parser",
+        set_method("msg_parser",
                    method = "parse",
                    action = self.parser_parse)
 
@@ -1271,7 +1265,7 @@ class S3ParsingModel(S3Model):
         """
             Parse unparsed messages
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         record = r.record
@@ -1306,7 +1300,7 @@ class S3ParsingModel(S3Model):
             Enable a Parser
             - Connect a Parser to a Channel
 
-            CLI API for shell scripts & to be called by S3Method
+            CLI API for shell scripts & to be called by CRUDMethod
 
             @ToDo: Ensure only 1 Parser is connected to any Channel at a time
         """
@@ -1353,7 +1347,7 @@ class S3ParsingModel(S3Model):
             Enable a Parser
             - Connect a Parser to a Channel
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         result = current.s3db.msg_parser_enable(r.id)
@@ -1367,7 +1361,7 @@ class S3ParsingModel(S3Model):
             Disable a Parser
             - Disconnect a Parser from a Channel
 
-            CLI API for shell scripts & to be called by S3Method
+            CLI API for shell scripts & to be called by CRUDMethod
         """
 
         db = current.db
@@ -1405,7 +1399,7 @@ class S3ParsingModel(S3Model):
             Disable a Parser
             - Disconnect a Parser from a Channel
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         result = current.s3db.msg_parser_disable(r.id)
@@ -1433,7 +1427,7 @@ class S3ParsingModel(S3Model):
                 current.s3db.msg_parser_enable(form.vars.id)
 
 # =============================================================================
-class S3RSSModel(S3ChannelModel):
+class MsgRSSModel(MsgChannelModel):
     """
         RSS channel
     """
@@ -1522,15 +1516,15 @@ class S3RSSModel(S3ChannelModel):
                        super_entity = "msg_channel",
                        )
 
-        set_method("msg", "rss_channel",
+        set_method("msg_rss_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "rss_channel",
+        set_method("msg_rss_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        set_method("msg", "rss_channel",
+        set_method("msg_rss_channel",
                    method = "poll",
                    action = self.msg_channel_poll)
 
@@ -1620,10 +1614,10 @@ class S3RSSModel(S3ChannelModel):
                        )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3SMSModel(S3Model):
+class MsgSMSModel(DataModel):
     """
         SMS: Short Message Service
 
@@ -1685,10 +1679,10 @@ class S3SMSModel(S3Model):
                        )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3SMSOutboundModel(S3Model):
+class MsgSMSOutboundModel(DataModel):
     """
         SMS: Short Message Service
         - Outbound Channels
@@ -1860,10 +1854,10 @@ class S3SMSOutboundModel(S3Model):
                   )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3TropoModel(S3Model):
+class MsgTropoModel(DataModel):
     """
         Tropo can be used to send & receive SMS, Twitter & XMPP
 
@@ -1902,15 +1896,15 @@ class S3TropoModel(S3Model):
                        super_entity = "msg_channel",
                        )
 
-        set_method("msg", "tropo_channel",
+        set_method("msg_tropo_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "tropo_channel",
+        set_method("msg_tropo_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        set_method("msg", "tropo_channel",
+        set_method("msg_tropo_channel",
                    method = "poll",
                    action = self.msg_channel_poll)
 
@@ -1927,10 +1921,10 @@ class S3TropoModel(S3Model):
                      )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3TwilioModel(S3ChannelModel):
+class MsgTwilioModel(MsgChannelModel):
     """
         Twilio Inbound SMS channel
         - for Outbound, use Web API
@@ -1985,15 +1979,15 @@ class S3TwilioModel(S3ChannelModel):
                        super_entity = "msg_channel",
                        )
 
-        set_method("msg", "twilio_channel",
+        set_method("msg_twilio_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "twilio_channel",
+        set_method("msg_twilio_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        set_method("msg", "twilio_channel",
+        set_method("msg_twilio_channel",
                    method = "poll",
                    action = self.msg_channel_poll)
 
@@ -2009,10 +2003,10 @@ class S3TwilioModel(S3ChannelModel):
                      *s3_meta_fields())
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3TwitterModel(S3Model):
+class MsgTwitterModel(DataModel):
 
     names = ("msg_twitter_channel",
              "msg_twitter",
@@ -2085,15 +2079,15 @@ class S3TwitterModel(S3Model):
                   super_entity = "msg_channel",
                   )
 
-        set_method("msg", "twitter_channel",
+        set_method("msg_twitter_channel",
                    method = "enable",
                    action = self.msg_channel_enable_interactive)
 
-        set_method("msg", "twitter_channel",
+        set_method("msg_twitter_channel",
                    method = "disable",
                    action = self.msg_channel_disable_interactive)
 
-        set_method("msg", "twitter_channel",
+        set_method("msg_twitter_channel",
                    method = "poll",
                    action = self.msg_channel_poll)
 
@@ -2148,7 +2142,7 @@ class S3TwitterModel(S3Model):
                   )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -2190,7 +2184,7 @@ class S3TwitterModel(S3Model):
             current.db(current.s3db.msg_twitter_channel.id != form.vars.id).update(login = False)
 
         # Normal onaccept processing
-        S3ChannelModel.channel_onaccept(form)
+        MsgChannelModel.channel_onaccept(form)
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -2234,7 +2228,7 @@ class S3TwitterModel(S3Model):
             s3[k] = ""
 
 # =============================================================================
-class S3TwitterSearchModel(S3ChannelModel):
+class MsgTwitterSearchModel(MsgChannelModel):
     """
         Twitter Searches
          - results can be fed to KeyGraph
@@ -2314,15 +2308,15 @@ class S3TwitterSearchModel(S3ChannelModel):
                                 ),
                     )
 
-        set_method("msg", "twitter_search",
+        set_method("msg_twitter_search",
                    method = "poll",
                    action = self.twitter_search_poll)
 
-        set_method("msg", "twitter_search",
+        set_method("msg_twitter_search",
                    method = "keygraph",
                    action = self.twitter_keygraph)
 
-        set_method("msg", "twitter_result",
+        set_method("msg_twitter_result",
                    method = "timeline",
                    action = self.twitter_timeline)
 
@@ -2380,7 +2374,7 @@ class S3TwitterSearchModel(S3ChannelModel):
                   )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
     # -----------------------------------------------------------------------------
     @staticmethod
@@ -2388,7 +2382,7 @@ class S3TwitterSearchModel(S3ChannelModel):
         """
             Perform a Search of Twitter
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         id = r.id
@@ -2406,7 +2400,7 @@ class S3TwitterSearchModel(S3ChannelModel):
         """
             Prcoess Search Results with KeyGraph
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         tablename = r.tablename
@@ -2511,7 +2505,7 @@ S3.timeline.now="''', now.isoformat(), '''"
         else:
             r.error(405, current.ERROR.BAD_METHOD)
 # =============================================================================
-class S3XFormsModel(S3Model):
+class MsgXFormsModel(DataModel):
     """
         XForms are used by the ODK Collect mobile client
 
@@ -2536,10 +2530,10 @@ class S3XFormsModel(S3Model):
                           )
 
         # ---------------------------------------------------------------------
-        return {}
+        return None
 
 # =============================================================================
-class S3BaseStationModel(S3Model):
+class MsgBaseStationModel(DataModel):
     """
         Base Stations (Cell Towers) are a type of Site
 
@@ -2612,6 +2606,6 @@ class S3BaseStationModel(S3Model):
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
         #
-        return {}
+        return None
 
 # END =========================================================================

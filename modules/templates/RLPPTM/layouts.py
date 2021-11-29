@@ -1,8 +1,12 @@
-# -*- coding: utf-8 -*-
+"""
+    Menu layouts for RLPPTM
+
+    License: MIT
+"""
 
 from gluon import URL, current, \
                   A, FORM, IMG, INPUT, LI, OPTION, SELECT, SPAN, TAG, UL
-from s3 import S3NavigationItem
+from core import S3NavigationItem
 from s3theme import NAV, SECTION
 
 # =============================================================================

@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
+"""
+    Event Model
 
-""" Sahana Eden Event Model
-
-    @copyright: 2009-2021 (c) Sahana Software Foundation
-    @license: MIT
+    Copyright: 2009-2021 (c) Sahana Software Foundation
 
     Permission is hereby granted, free of charge, to any person
     obtaining a copy of this software and associated documentation
@@ -27,44 +25,44 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
-__all__ = ("S3EventModel",
-           "S3EventLocationModel",
-           "S3EventNameModel",
-           "S3EventTagModel",
-           "S3IncidentModel",
-           "S3IncidentLogModel",
-           "S3IncidentReportModel",
-           "S3IncidentReportOrganisationGroupModel",
-           "S3IncidentTypeModel",
-           "S3IncidentTypeTagModel",
-           "S3EventActivityModel",
-           "S3EventAssetModel",
-           "S3EventBookmarkModel",
-           "S3EventCMSModel",
-           "S3EventCMSTagModel",
-           "S3EventDCModel",
-           "S3EventExpenseModel",
-           "S3EventForumModel",
-           "S3EventHRModel",
-           "S3EventTeamModel",
-           "S3EventImpactModel",
-           "S3EventMapModel",
-           "S3EventNeedModel",
-           "S3EventNeedResponseModel",
-           "S3EventOrganisationModel",
-           "S3EventProjectModel",
-           "S3EventRequestModel",
-           "S3EventResourceModel",
-           "S3EventScenarioModel",
-           "S3EventScenarioAssetModel",
-           "S3EventScenarioHRModel",
-           "S3EventScenarioOrganisationModel",
-           "S3EventScenarioTaskModel",
-           "S3EventSiteModel",
-           "S3EventShelterModel",
-           "S3EventSitRepModel",
-           "S3EventTagModel",
-           "S3EventTaskModel",
+__all__ = ("EventModel",
+           "EventLocationModel",
+           "EventNameModel",
+           "EventTagModel",
+           "EventIncidentModel",
+           "EventIncidentLogModel",
+           "EventIncidentReportModel",
+           "EventIncidentReportOrganisationGroupModel",
+           "EventIncidentTypeModel",
+           "EventIncidentTypeTagModel",
+           "EventActivityModel",
+           "EventAssetModel",
+           "EventBookmarkModel",
+           "EventCMSModel",
+           "EventCMSTagModel",
+           "EventDCModel",
+           "EventExpenseModel",
+           "EventForumModel",
+           "EventHRModel",
+           "EventTeamModel",
+           "EventImpactModel",
+           "EventMapModel",
+           "EventNeedModel",
+           "EventNeedResponseModel",
+           "EventOrganisationModel",
+           "EventProjectModel",
+           "EventRequestModel",
+           "EventResourceModel",
+           "EventScenarioModel",
+           "EventScenarioAssetModel",
+           "EventScenarioHRModel",
+           "EventScenarioOrganisationModel",
+           "EventScenarioTaskModel",
+           "EventSiteModel",
+           "EventShelterModel",
+           "EventSitRepModel",
+           "EventTagModel",
+           "EventTaskModel",
            #"event_ActionPlan",
            #"event_ScenarioActionPlan",
            #"event_ApplyScenario",
@@ -77,15 +75,16 @@ __all__ = ("S3EventModel",
            "event_set_event_from_incident",
            )
 
+from collections import OrderedDict
+
 from gluon import *
 from gluon.storage import Storage
 
-from ..s3 import *
-from s3compat import long
+from ..core import *
 from s3layouts import S3PopupLink
 
 # =============================================================================
-class S3EventModel(S3Model):
+class EventModel(DataModel):
     """
         Event Model
 
@@ -565,36 +564,36 @@ class S3EventModel(S3Model):
                             )
 
         # Custom Methods
-        set_method("event", "event",
+        set_method("event_event",
                    method = "dispatch",
                    action = event_notification_dispatcher)
 
-        set_method("event", "event",
+        set_method("event_event",
                    method = "add_bookmark",
                    action = self.event_add_bookmark)
 
-        set_method("event", "event",
+        set_method("event_event",
                    method = "remove_bookmark",
                    action = self.event_remove_bookmark)
 
-        set_method("event", "event",
+        set_method("event_event",
                    method = "add_tag",
                    action = self.event_add_tag)
 
-        set_method("event", "event",
+        set_method("event_event",
                    method = "remove_tag",
                    action = self.event_remove_tag)
 
-        set_method("event", "event",
+        set_method("event_event",
                    method = "share",
                    action = self.event_share)
 
-        set_method("event", "event",
+        set_method("event_event",
                    method = "unshare",
                    action = self.event_unshare)
 
         # Custom Method to Assign HRs
-        set_method("event", "event",
+        set_method("event_event",
                    method = "assign",
                    action = self.pr_AssignMethod(component="human_resource"))
 
@@ -612,12 +611,10 @@ class S3EventModel(S3Model):
             Return safe defaults in case the model has been deactivated.
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
+        dummy = S3ReusableField.dummy
 
-        return {"event_event_id": lambda **attr: dummy("event_id"),
-                "event_type_id": lambda **attr: dummy("event_type_id"),
+        return {"event_event_id": dummy("event_id"),
+                "event_type_id": dummy("event_type_id"),
                 }
 
     # -------------------------------------------------------------------------
@@ -626,7 +623,7 @@ class S3EventModel(S3Model):
         """
             Bookmark an Event
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         event_id = r.id
@@ -669,7 +666,7 @@ class S3EventModel(S3Model):
         """
             Remove a Bookmark for an Event
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         event_id = r.id
@@ -700,7 +697,7 @@ class S3EventModel(S3Model):
         """
             Add a CMS Tag to an Event
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called as an afterTagAdded callback to tag-it.js
         """
 
@@ -760,7 +757,7 @@ class S3EventModel(S3Model):
         """
             Remove a CMS Tag from an Event
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called as an afterTagRemoved callback to tag-it.js
         """
 
@@ -800,7 +797,7 @@ class S3EventModel(S3Model):
         """
             Share an Event to a Forum
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called via AJAX
         """
 
@@ -850,7 +847,7 @@ class S3EventModel(S3Model):
         """
             Unshare an Event from a Forum
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called via AJAX
         """
 
@@ -890,13 +887,12 @@ class S3EventModel(S3Model):
     def event_event_year(row):
         """
             Virtual field for event_event - returns the year of this entry
-            used for report.
+            used for report. Requires "start_date" to be in extra_fields.
 
-            Requires "start_date" to be in extra_fields
+            Args:
+                row: the Row
 
-            @param row: the Row
-
-            @ToDo: Extend this to show multiple years if open for multiple?
+            TODO Extend this to show multiple years if open for multiple?
         """
 
         try:
@@ -939,7 +935,7 @@ class S3EventModel(S3Model):
                 db(table.id == row.post_id).update(expired=True)
 
 # =============================================================================
-class S3EventLocationModel(S3Model):
+class EventLocationModel(DataModel):
     """
         Event Locations model
         - locations for Events
@@ -982,10 +978,10 @@ class S3EventLocationModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventNameModel(S3Model):
+class EventNameModel(DataModel):
     """
         Event Names model
         - local names for Events
@@ -1021,10 +1017,10 @@ class S3EventNameModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventTagModel(S3Model):
+class EventTagModel(DataModel):
     """
         Event Tags model
         - tags for Events
@@ -1070,10 +1066,10 @@ class S3EventTagModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3IncidentModel(S3Model):
+class EventIncidentModel(DataModel):
     """
         Incidents
          - the primary unit at which things are managed:
@@ -1168,7 +1164,7 @@ class S3IncidentModel(S3Model):
                                 requires = IS_EMPTY_OR(
                                             IS_IN_SET(severity_opts)
                                             ),
-                                represent = S3Represent(options = severity_opts),
+                                represent = represent_option(severity_opts),
                                 # Enable this field in templates if-required
                                 readable = False,
                                 writable = False,
@@ -1178,7 +1174,7 @@ class S3IncidentModel(S3Model):
                                 requires = IS_EMPTY_OR(
                                             IS_IN_SET(level_opts)
                                             ),
-                                represent = S3Represent(options = level_opts),
+                                represent = represent_option(level_opts),
                                 # Enable this field in templates if-required
                                 readable = False,
                                 writable = False,
@@ -1441,47 +1437,47 @@ class S3IncidentModel(S3Model):
                             )
 
         # Custom Methods
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "add_bookmark",
                    action = self.incident_add_bookmark)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "remove_bookmark",
                    action = self.incident_remove_bookmark)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "add_tag",
                    action = self.incident_add_tag)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "remove_tag",
                    action = self.incident_remove_tag)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "share",
                    action = self.incident_share)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "unshare",
                    action = self.incident_unshare)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "plan",
                    action = event_ActionPlan)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "scenario",
                    action = event_ApplyScenario)
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "assign",
                    action = self.pr_AssignMethod(component="human_resource"))
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "event",
                    action = event_EventAssignMethod())
 
-        set_method("event", "incident",
+        set_method("event_incident",
                    method = "dispatch",
                    action = event_notification_dispatcher)
 
@@ -1496,11 +1492,7 @@ class S3IncidentModel(S3Model):
             Return safe defaults in case the model has been deactivated.
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return {"event_incident_id": lambda **attr: dummy("incident_id"),
+        return {"event_incident_id": S3ReusableField.dummy("incident_id"),
                 }
 
     # ---------------------------------------------------------------------
@@ -1808,7 +1800,7 @@ class S3IncidentModel(S3Model):
         """
             Bookmark an Incident
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         incident_id = r.id
@@ -1851,7 +1843,7 @@ class S3IncidentModel(S3Model):
         """
             Remove a Bookmark for an Incident
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
         """
 
         incident_id = r.id
@@ -1882,7 +1874,7 @@ class S3IncidentModel(S3Model):
         """
             Add a CMS Tag to an Incident
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called as an afterTagAdded callback to tag-it.js
         """
 
@@ -1941,7 +1933,7 @@ class S3IncidentModel(S3Model):
         """
             Remove a CMS Tag from an Incident
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called as an afterTagRemoved callback to tag-it.js
         """
 
@@ -1980,7 +1972,7 @@ class S3IncidentModel(S3Model):
         """
             Share an Incident to a Forum
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called via AJAX
         """
 
@@ -2030,7 +2022,7 @@ class S3IncidentModel(S3Model):
         """
             Unshare an Incident from a Forum
 
-            S3Method for interactive requests
+            CRUD method for interactive requests
             - designed to be called via AJAX
         """
 
@@ -2066,7 +2058,7 @@ class S3IncidentModel(S3Model):
         return output
 
 # =============================================================================
-class S3IncidentReportModel(S3Model):
+class EventIncidentReportModel(DataModel):
     """
         Incident Reports
          - reports about incidents
@@ -2222,7 +2214,7 @@ class S3IncidentReportModel(S3Model):
                        )
 
         # Custom Methods
-        self.set_method("event", "incident_report",
+        self.set_method("event_incident_report",
                         method = "assign",
                         action = event_IncidentAssignMethod(component = "incident_report_incident",
                                                             next_tab = "incident_report"))
@@ -2268,10 +2260,10 @@ class S3IncidentReportModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventActivityModel(S3Model):
+class EventActivityModel(DataModel):
     """
         Link Project Activities to Events
     """
@@ -2304,10 +2296,10 @@ class S3EventActivityModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventRequestModel(S3Model):
+class EventRequestModel(DataModel):
     """
         Link Requests to Incidents &/or Events
     """
@@ -2343,10 +2335,10 @@ class S3EventRequestModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventResourceModel(S3Model):
+class EventResourceModel(DataModel):
     """
         Resources Assigned to Events/Incidents
         - depends on Stats module
@@ -2365,7 +2357,7 @@ class S3EventResourceModel(S3Model):
 
         if not current.deployment_settings.has_module("stats"):
             current.log.warning("Event Resource Model needs Stats module enabling")
-            return {}
+            return None
 
         T = current.T
         super_link = self.super_link
@@ -2454,7 +2446,7 @@ class S3EventResourceModel(S3Model):
             msg_list_empty=T("No Resources assigned to Incident"))
 
         # Custom Methods
-        #self.set_method("event", "resource",
+        #self.set_method("event_resource",
         #                method = "check-in",
         #                action = S3CheckInMethod())
 
@@ -2522,10 +2514,10 @@ class S3EventResourceModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3IncidentReportOrganisationGroupModel(S3Model):
+class EventIncidentReportOrganisationGroupModel(DataModel):
     """
         Links between Incident Reports & Organisation Groups
     """
@@ -2560,10 +2552,10 @@ class S3IncidentReportOrganisationGroupModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3IncidentLogModel(S3Model):
+class EventIncidentLogModel(DataModel):
     """
         Incident Logs
             - record of all changes
@@ -2633,7 +2625,7 @@ class S3IncidentLogModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -2666,7 +2658,7 @@ class S3IncidentLogModel(S3Model):
             current.msg.send_by_pe_id(pe_id, subject, message, contact_method="SMS")
 
 # =============================================================================
-class S3IncidentTypeModel(S3Model):
+class EventIncidentTypeModel(DataModel):
     """
         Incident Types
     """
@@ -2787,15 +2779,11 @@ class S3IncidentTypeModel(S3Model):
             Return safe defaults in case the model has been deactivated.
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return {"event_incident_type_id": lambda **attr: dummy("incident_type_id"),
+        return {"event_incident_type_id": S3ReusableField.dummy("incident_type_id"),
                 }
 
 # =============================================================================
-class S3IncidentTypeTagModel(S3Model):
+class EventIncidentTypeTagModel(DataModel):
     """
         Incident Type Tags
          - Key-Value extensions
@@ -2831,10 +2819,10 @@ class S3IncidentTypeTagModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventAlertModel(S3Model):
+class EventAlertModel(DataModel):
     """
         Alerts for Events/Incidents
 
@@ -2896,7 +2884,7 @@ class S3EventAlertModel(S3Model):
             msg_list_empty = T("No Alerts currently defined"))
 
         # Custom method to send alerts
-        #self.set_method("event", "alert",
+        #self.set_method("event_alert",
         #                method = "send",
         #                action = self.event_alert_send)
 
@@ -2935,10 +2923,10 @@ class S3EventAlertModel(S3Model):
             msg_list_empty = T("No Recipients currently defined"))
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventAssetModel(S3Model):
+class EventAssetModel(DataModel):
     """
         Link Assets to Incidents
     """
@@ -2952,7 +2940,7 @@ class S3EventAssetModel(S3Model):
         if not settings.has_module("supply"):
             # Don't crash
             #return self.defaults()
-            return {}
+            return None
 
         T = current.T
 
@@ -3084,7 +3072,7 @@ class S3EventAssetModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # ---------------------------------------------------------------------
     @staticmethod
@@ -3163,7 +3151,7 @@ class S3EventAssetModel(S3Model):
                              )
 
 # =============================================================================
-class S3EventBookmarkModel(S3Model):
+class EventBookmarkModel(DataModel):
     """
         Bookmarks for Events &/or Incidents
         - the Incident bookmarks do NOT populate the Event's
@@ -3209,10 +3197,10 @@ class S3EventBookmarkModel(S3Model):
         #    msg_list_empty = T("No Incidents currently bookmarked"))
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventCMSModel(S3Model):
+class EventCMSModel(DataModel):
     """
         Link CMS Posts to Events &/or Incidents
     """
@@ -3288,10 +3276,10 @@ class S3EventCMSModel(S3Model):
                   )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventCMSTagModel(S3Model):
+class EventCMSTagModel(DataModel):
     """
         Link (CMS) Tags to Events or Incidents (used in WACOP)
         - the Incident tags do NOT populate the Event's
@@ -3330,10 +3318,10 @@ class S3EventCMSTagModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventDCModel(S3Model):
+class EventDCModel(DataModel):
     """
         Link Data Collections to Events &/or Incidents
     """
@@ -3400,10 +3388,10 @@ class S3EventDCModel(S3Model):
                   )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventExpenseModel(S3Model):
+class EventExpenseModel(DataModel):
     """
         Link Expenses to Incidents &/or Events
         - normally linked at the Incident level & just visible at the Event level
@@ -3449,10 +3437,10 @@ class S3EventExpenseModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventForumModel(S3Model):
+class EventForumModel(DataModel):
     """
         Shares for Events &/or Incidents
         - the Incident shares do NOT populate the Event's
@@ -3497,10 +3485,10 @@ class S3EventForumModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventHRModel(S3Model):
+class EventHRModel(DataModel):
     """
         Link Human Resources to Events/Incidents
     """
@@ -3673,7 +3661,7 @@ class S3EventHRModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
     # ---------------------------------------------------------------------
     @staticmethod
@@ -3752,7 +3740,7 @@ class S3EventHRModel(S3Model):
                              )
 
 # =============================================================================
-class S3EventTeamModel(S3Model):
+class EventTeamModel(DataModel):
     """ Link Teams to Events &/or Incidents """
 
     names = ("event_team_status",
@@ -3864,10 +3852,10 @@ class S3EventTeamModel(S3Model):
 
         # ---------------------------------------------------------------------
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventImpactModel(S3Model):
+class EventImpactModel(DataModel):
     """
         Link Events &/or Incidents with Impacts
     """
@@ -3879,7 +3867,7 @@ class S3EventImpactModel(S3Model):
 
         if not current.deployment_settings.has_module("stats"):
             current.log.warning("Event Impact Model needs Stats module enabling")
-            return {}
+            return None
 
         #T = current.T
 
@@ -3925,10 +3913,10 @@ class S3EventImpactModel(S3Model):
         #    msg_list_empty = T("No Impacts currently registered in this Event"))
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventMapModel(S3Model):
+class EventMapModel(DataModel):
     """
         Link Map Configs to Incidents
     """
@@ -3972,10 +3960,10 @@ class S3EventMapModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventNeedModel(S3Model):
+class EventNeedModel(DataModel):
     """
         Link Events &/or Incidents with Needs
     """
@@ -4030,10 +4018,10 @@ class S3EventNeedModel(S3Model):
         #    msg_list_empty = T("No Needs currently registered in this Event"))
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventNeedResponseModel(S3Model):
+class EventNeedResponseModel(DataModel):
     """
         Link Events &/or Incidents with Need Responses (Activity Groups)
     """
@@ -4088,10 +4076,10 @@ class S3EventNeedResponseModel(S3Model):
         #    msg_list_empty = T("No Activity Groups currently registered in this Event"))
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventOrganisationModel(S3Model):
+class EventOrganisationModel(DataModel):
     """
         Link Organisations to Events &/or Incidents
     """
@@ -4161,10 +4149,10 @@ class S3EventOrganisationModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventProjectModel(S3Model):
+class EventProjectModel(DataModel):
     """
         Link Projects to Events
     """
@@ -4197,10 +4185,10 @@ class S3EventProjectModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventScenarioModel(S3Model):
+class EventScenarioModel(DataModel):
     """
         Scenario Model
 
@@ -4322,7 +4310,7 @@ class S3EventScenarioModel(S3Model):
                        super_entity = "doc_entity",
                        )
 
-        self.set_method("event", "scenario",
+        self.set_method("event_scenario",
                         method = "plan",
                         action = event_ScenarioActionPlan)
 
@@ -4331,7 +4319,7 @@ class S3EventScenarioModel(S3Model):
                 }
 
 # =============================================================================
-class S3EventScenarioAssetModel(S3Model):
+class EventScenarioAssetModel(DataModel):
     """
         Link Scenarios to Assets
     """
@@ -4345,7 +4333,7 @@ class S3EventScenarioAssetModel(S3Model):
         if not settings.has_module("supply"):
             # Don't crash
             #return self.defaults()
-            return {}
+            return None
 
         T = current.T
 
@@ -4428,10 +4416,10 @@ class S3EventScenarioAssetModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventScenarioHRModel(S3Model):
+class EventScenarioHRModel(DataModel):
     """
         Link Scenarios to Human Resources
     """
@@ -4527,10 +4515,10 @@ class S3EventScenarioHRModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventScenarioOrganisationModel(S3Model):
+class EventScenarioOrganisationModel(DataModel):
     """
         Link Scenarios to Organisations
     """
@@ -4578,10 +4566,10 @@ class S3EventScenarioOrganisationModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventScenarioTaskModel(S3Model):
+class EventScenarioTaskModel(DataModel):
     """
         Link Scenarios to Tasks
 
@@ -4632,10 +4620,10 @@ class S3EventScenarioTaskModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventSiteModel(S3Model):
+class EventSiteModel(DataModel):
     """
         Link Sites (Facilities) to Incidents
     """
@@ -4747,10 +4735,10 @@ class S3EventSiteModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventShelterModel(S3Model):
+class EventShelterModel(DataModel):
     """
         Link Shelters to Events
     """
@@ -4819,10 +4807,10 @@ class S3EventShelterModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
-class S3EventSitRepModel(S3Model):
+class EventSitRepModel(DataModel):
     """
         Situation Reports
         - can be simple text/rich text
@@ -4916,7 +4904,7 @@ class S3EventSitRepModel(S3Model):
                                                  ),
                           #Field("phase", "integer",
                           #      label = T("Incident Lifecycle Phase"),
-                          #      represent = S3Represent(options = phase_opts),
+                          #      represent = represent_option(phase_opts),
                           #      requires = IS_EMPTY_OR(
                           #                  IS_IN_SET(phase_opts)
                           #                  ),
@@ -4933,7 +4921,7 @@ class S3EventSitRepModel(S3Model):
                                 ),
                           #Field("version", length=16,
                           #      label = T("Version"),
-                          #      represent = S3Represent(options = version_opts),
+                          #      represent = represent_option(version_opts),
                           #      requires = IS_IN_SET(version_opts) if sitrep_edxl else IS_EMPTY_OR(IS_IN_SET(version_opts)),
                           #      readable = sitrep_edxl,
                           #      writable = sitrep_edxl,
@@ -4965,7 +4953,7 @@ class S3EventSitRepModel(S3Model):
                           #      ),
                           #Field("urgency", length=16,
                           #      label = T("Urgency"),
-                          #      represent = S3Represent(options = urgency_opts),
+                          #      represent = represent_option(urgency_opts),
                           #      requires = IS_EMPTY_OR(
                           #                  IS_IN_SET(urgency_opts)
                           #                  ),
@@ -4974,14 +4962,14 @@ class S3EventSitRepModel(S3Model):
                           #      ),
                           #Field("Confidence", length=16,
                           #      label = T("Confidence"),
-                          #      represent = S3Represent(options = confidence_opts),
+                          #      represent = represent_option(confidence_opts),
                           #      requires = IS_IN_SET(confidence_opts) if sitrep_edxl else IS_EMPTY_OR(IS_IN_SET(confidence_opts)),
                           #      readable = sitrep_edxl,
                           #      writable = sitrep_edxl,
                           #      ),
                           #Field("severity", length=16,
                           #      label = T("Severity"),
-                          #      represent = S3Represent(options = severity_opts),
+                          #      represent = represent_option(severity_opts),
                           #      requires = IS_IN_SET(severity_opts) if sitrep_edxl else IS_EMPTY_OR(IS_IN_SET(severity_opts)),
                           #      readable = sitrep_edxl,
                           #      writable = sitrep_edxl,
@@ -5134,11 +5122,7 @@ class S3EventSitRepModel(S3Model):
             Return safe defaults in case the model has been deactivated.
         """
 
-        dummy = S3ReusableField("dummy_id", "integer",
-                                readable = False,
-                                writable = False)
-
-        return {"event_sitrep_id": lambda **attr: dummy("sitrep_id"),
+        return {"event_sitrep_id": S3ReusableField.dummy("sitrep_id"),
                 }
 
     # -------------------------------------------------------------------------
@@ -5189,7 +5173,7 @@ class S3EventSitRepModel(S3Model):
         db(db.event_sitrep.id == sitrep_id).update(table_id=table_id)
 
 # =============================================================================
-class S3EventTaskModel(S3Model):
+class EventTaskModel(DataModel):
     """
         Link Tasks to Incidents &/or Events
         - normally linked at the Incident level & just visible at the Event level
@@ -5251,7 +5235,7 @@ class S3EventTaskModel(S3Model):
                        )
 
         # Pass names back to global scope (s3.*)
-        return {}
+        return None
 
 # =============================================================================
 def set_event_from_incident(form, tablename):
@@ -5298,7 +5282,7 @@ event_set_event_from_incident = set_event_from_incident
 # Custom Resource Methods
 
 # =============================================================================
-class event_ActionPlan(S3Method):
+class event_ActionPlan(CRUDMethod):
     """
         Custom profile page with multiple DataTables:
             * Tasks
@@ -5309,11 +5293,12 @@ class event_ActionPlan(S3Method):
 
     def __init__(self, form=None):
         """
-            Constructor
-
-            @param form: widget config to inject at the top of the page,
-                         or a callable to produce such a widget config
+            Args:
+                form: widget config to inject at the top of the page,
+                      or a callable to produce such a widget config
         """
+
+        super(event_ActionPlan, self).__init__()
 
         if not form:
             form = {"type": "form",
@@ -5333,10 +5318,11 @@ class event_ActionPlan(S3Method):
     # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Entry point for REST API
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller arguments
+            Args:
+                r: the CRUDRequest
+                attr: controller arguments
         """
 
         if r.name == "incident" and \
@@ -5553,7 +5539,7 @@ class event_ActionPlan(S3Method):
             r.error(405, current.ERROR.BAD_METHOD)
 
 # =============================================================================
-class event_ScenarioActionPlan(S3Method):
+class event_ScenarioActionPlan(CRUDMethod):
     """
         Custom profile page with multiple DataTables:
             * Tasks
@@ -5564,11 +5550,12 @@ class event_ScenarioActionPlan(S3Method):
 
     def __init__(self, form=None):
         """
-            Constructor
-
-            @param form: widget config to inject at the top of the page,
-                         or a callable to produce such a widget config
+            Args:
+                form: widget config to inject at the top of the page,
+                      or a callable to produce such a widget config
         """
+
+        super(event_ScenarioActionPlan, self).__init__()
 
         if not form:
             form = {"type": "form",
@@ -5588,10 +5575,11 @@ class event_ScenarioActionPlan(S3Method):
     # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Entry point for REST API
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller arguments
+            Args:
+                r: the CRUDRequest
+                attr: controller arguments
         """
 
         if r.name == "scenario" and \
@@ -5806,7 +5794,7 @@ class event_ScenarioActionPlan(S3Method):
             r.error(405, current.ERROR.BAD_METHOD)
 
 # =============================================================================
-class event_ApplyScenario(S3Method):
+class event_ApplyScenario(CRUDMethod):
     """
         Populate an Incident with a Scenario's:
             * Tasks
@@ -5817,10 +5805,11 @@ class event_ApplyScenario(S3Method):
     # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Entry point for REST API
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller arguments
+            Args:
+                r: the CRUDRequest
+                attr: controller arguments
         """
 
         if r.http != "POST":
@@ -5926,18 +5915,20 @@ class event_ApplyScenario(S3Method):
         return output
 
 # =============================================================================
-class event_EventAssignMethod(S3Method):
+class event_EventAssignMethod(CRUDMethod):
     """
         Custom Method to allow things to be assigned to an Event
         e.g. Incident
     """
 
-    def __init__(self, component=None, next_tab=None
-                 ):
+    def __init__(self, component=None, next_tab=None):
         """
-            @param component: the Component in which to create records
-            @param next_tab: the component/method to redirect to after assigning
+            Args:
+                component: the Component in which to create records
+                next_tab: the component/method to redirect to after assigning
         """
+
+        super(event_EventAssignMethod, self).__init__()
 
         self.component = component
         if next_tab:
@@ -5945,12 +5936,14 @@ class event_EventAssignMethod(S3Method):
         else:
             self.next_tab = component
 
+    # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Apply method.
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller options for this request
+            Args:
+                r: the CRUDRequest
+                attr: controller options for this request
         """
 
         if self.component:
@@ -6199,8 +6192,6 @@ class event_EventAssignMethod(S3Method):
             #if s3.filter:
             #    resource.add_filter(s3.filter)
 
-            dt_id = "datatable"
-
             # Bulk actions
             dt_bulk_actions = [(T("Assign"), "assign")]
 
@@ -6223,7 +6214,7 @@ class event_EventAssignMethod(S3Method):
                 if filter_widgets:
 
                     # Where to retrieve filtered data from:
-                    submit_url_vars = resource.crud._remove_filters(r.get_vars)
+                    submit_url_vars = CRUDMethod._remove_filters(r.get_vars)
                     filter_submit_url = r.url(vars=submit_url_vars)
 
                     # Default Filters (before selecting data!)
@@ -6270,16 +6261,15 @@ class event_EventAssignMethod(S3Method):
                                        count=True,
                                        represent=True)
                 filteredrows = data["numrows"]
-                dt = S3DataTable(data["rfields"], data["rows"])
+                dt = DataTable(data["rfields"], data["rows"], "datatable")
 
                 items = dt.html(totalrows,
                                 filteredrows,
-                                dt_id,
                                 dt_ajax_url=r.url(representation="aadata"),
                                 dt_bulk_actions=dt_bulk_actions,
                                 dt_pageLength=display_length,
-                                dt_pagination="true",
-                                dt_searching="false",
+                                dt_pagination=True,
+                                dt_searching=False,
                                 )
 
                 response.view = "list_filter.html"
@@ -6304,11 +6294,10 @@ class event_EventAssignMethod(S3Method):
                                        count=True,
                                        represent=True)
                 filteredrows = data["numrows"]
-                dt = S3DataTable(data["rfields"], data["rows"])
+                dt = DataTable(data["rfields"], data["rows"], "datatable")
 
                 items = dt.json(totalrows,
                                 filteredrows,
-                                dt_id,
                                 echo,
                                 dt_bulk_actions=dt_bulk_actions)
                 response.headers["Content-Type"] = "application/json"
@@ -6320,18 +6309,20 @@ class event_EventAssignMethod(S3Method):
             r.error(405, current.ERROR.BAD_METHOD)
 
 # =============================================================================
-class event_IncidentAssignMethod(S3Method):
+class event_IncidentAssignMethod(CRUDMethod):
     """
         Custom Method to allow things to be assigned to an Incident
         e.g. Incident Report
     """
 
-    def __init__(self, component, next_tab=None
-                 ):
+    def __init__(self, component, next_tab=None):
         """
-            @param component: the Component in which to create records
-            @param next_tab: the component/method to redirect to after assigning
+            Args:
+                component: the Component in which to create records
+                next_tab: the component/method to redirect to after assigning
         """
+
+        super(event_IncidentAssignMethod, self).__init__()
 
         self.component = component
         if next_tab:
@@ -6341,12 +6332,14 @@ class event_IncidentAssignMethod(S3Method):
 
         self.next = None
 
+    # -------------------------------------------------------------------------
     def apply_method(self, r, **attr):
         """
-            Apply method.
+            Applies the method (controller entry point).
 
-            @param r: the S3Request
-            @param attr: controller options for this request
+            Args:
+                r: the CRUDRequest
+                attr: controller options for this request
         """
 
         try:
@@ -6422,7 +6415,7 @@ class event_IncidentAssignMethod(S3Method):
                 for incident_id in selected:
 
                     try:
-                        i_id = long(incident_id.strip())
+                        i_id = int(incident_id.strip())
                     except ValueError:
                         continue
 
@@ -6584,8 +6577,6 @@ class event_IncidentAssignMethod(S3Method):
             #if s3.filter:
             #    resource.add_filter(s3.filter)
 
-            dt_id = "datatable"
-
             # Bulk actions
             dt_bulk_actions = [(T("Assign"), "assign")]
 
@@ -6608,7 +6599,7 @@ class event_IncidentAssignMethod(S3Method):
                 if filter_widgets:
 
                     # Where to retrieve filtered data from:
-                    submit_url_vars = resource.crud._remove_filters(r.get_vars)
+                    submit_url_vars = CRUDMethod._remove_filters(r.get_vars)
                     filter_submit_url = r.url(vars=submit_url_vars)
 
                     # Default Filters (before selecting data!)
@@ -6654,16 +6645,15 @@ class event_IncidentAssignMethod(S3Method):
                                        count = True,
                                        represent = True)
                 filteredrows = data["numrows"]
-                dt = S3DataTable(data["rfields"], data["rows"])
+                dt = DataTable(data["rfields"], data["rows"], "datatable")
 
                 items = dt.html(totalrows,
                                 filteredrows,
-                                dt_id,
                                 dt_ajax_url = r.url(representation="aadata"),
                                 dt_bulk_actions = dt_bulk_actions,
                                 dt_pageLength = display_length,
-                                dt_pagination = "true",
-                                dt_searching = "false",
+                                dt_pagination = True,
+                                dt_searching = False,
                                 )
 
                 response.view = "list_filter.html"
@@ -6693,11 +6683,10 @@ class event_IncidentAssignMethod(S3Method):
                                        count = True,
                                        represent = True)
                 filteredrows = data["numrows"]
-                dt = S3DataTable(data["rfields"], data["rows"])
+                dt = DataTable(data["rfields"], data["rows"], "datatable")
 
                 items = dt.json(totalrows,
                                 filteredrows,
-                                dt_id,
                                 echo,
                                 dt_bulk_actions = dt_bulk_actions)
                 response.headers["Content-Type"] = "application/json"
@@ -6829,11 +6818,12 @@ def event_event_list_layout(list_id, item_id, resource, rfields, record,
     """
         Default dataList item renderer for Incidents on Profile pages
 
-        @param list_id: the HTML ID of the list
-        @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
-        @param rfields: the S3ResourceFields to render
-        @param record: the record as dict
+        Args:
+            list_id: the HTML ID of the list
+            item_id: the HTML ID of the item
+            resource: the CRUDResource to render
+            rfields: the S3ResourceFields to render
+            record: the record as dict
     """
 
     record_id = record["event_event.id"]
@@ -6860,7 +6850,7 @@ def event_event_list_layout(list_id, item_id, resource, rfields, record,
                                      "record": record_id},
                                ),
                      _class="s3_modal",
-                     _title=S3CRUD.crud_string(resource.tablename,
+                     _title=get_crud_string(resource.tablename,
                                                "title_update"),
                      )
     else:
@@ -6868,7 +6858,7 @@ def event_event_list_layout(list_id, item_id, resource, rfields, record,
     if permit("delete", table, record_id=record_id):
         delete_btn = A(ICON("delete"),
                        _class="dl-item-delete",
-                       _title=S3CRUD.crud_string(resource.tablename,
+                       _title=get_crud_string(resource.tablename,
                                                  "label_delete_button"),
                        )
     else:
@@ -6913,11 +6903,12 @@ def event_incident_list_layout(list_id, item_id, resource, rfields, record,
     """
         Default dataList item renderer for Incidents on Profile pages
 
-        @param list_id: the HTML ID of the list
-        @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
-        @param rfields: the S3ResourceFields to render
-        @param record: the record as dict
+        Args:
+            list_id: the HTML ID of the list
+            item_id: the HTML ID of the item
+            resource: the CRUDResource to render
+            rfields: the S3ResourceFields to render
+            record: the record as dict
     """
 
     raw = record._row
@@ -6963,16 +6954,16 @@ def event_incident_list_layout(list_id, item_id, resource, rfields, record,
                                      "record": record_id},
                                ),
                      _class="s3_modal",
-                     _title=S3CRUD.crud_string(resource.tablename,
-                                               "title_update"),
+                     _title=get_crud_string(resource.tablename,
+                                            "title_update"),
                      )
     else:
         edit_btn = ""
     if permit("delete", table, record_id=record_id):
         delete_btn = A(ICON("delete"),
                        _class="dl-item-delete",
-                       _title=S3CRUD.crud_string(resource.tablename,
-                                                 "label_delete_button"),
+                       _title=get_crud_string(resource.tablename,
+                                              "label_delete_button"),
                        )
     else:
         delete_btn = ""
@@ -7019,11 +7010,12 @@ def event_resource_list_layout(list_id, item_id, resource, rfields, record):
     """
         Default dataList item renderer for Resources on Profile pages
 
-        @param list_id: the HTML ID of the list
-        @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
-        @param rfields: the S3ResourceFields to render
-        @param record: the record as dict
+        Args:
+            list_id: the HTML ID of the list
+            item_id: the HTML ID of the item
+            resource: the CRUDResource to render
+            rfields: the S3ResourceFields to render
+            record: the record as dict
     """
 
     raw = record._row
@@ -7082,18 +7074,18 @@ def event_resource_list_layout(list_id, item_id, resource, rfields, record):
                                  vars = urlvars,
                                  ),
                      _class = "s3_modal",
-                     _title = S3CRUD.crud_string(resource.tablename,
-                                                 "title_update",
-                                                 ),
+                     _title = get_crud_string(resource.tablename,
+                                              "title_update",
+                                              ),
                      )
     else:
         edit_btn = ""
     if permit("delete", table, record_id=record_id):
         delete_btn = A(ICON("delete"),
                        _class = "dl-item-delete",
-                       _title = S3CRUD.crud_string(resource.tablename,
-                                                   "label_delete_button",
-                                                   ),
+                       _title = get_crud_string(resource.tablename,
+                                                "label_delete_button",
+                                                ),
                        )
     else:
         delete_btn = ""

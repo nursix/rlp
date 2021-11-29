@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # Tool to adjust pool assignments of volunteers
 #
 # RLP Template Version 1.6.0
@@ -62,8 +60,8 @@ def adjust_pools(rules):
     s3db = current.s3db
 
     # Customise Resources (doesn't happen automatically when running from CLI)
-    from s3 import s3_request
-    r = s3_request("pr", "person")
+    from core import crud_request
+    r = crud_request("pr", "person")
     r.customise_resource("pr_person")
     r.customise_resource("pr_group_membership")
 

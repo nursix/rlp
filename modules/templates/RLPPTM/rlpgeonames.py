@@ -1,6 +1,11 @@
-from functools import partial
+"""
+    Custom Geocoder for RLPPTM
 
-from s3compat import urlencode
+    License: MIT
+"""
+
+from functools import partial
+from urllib.parse import urlencode
 
 try:
     from geopy.geocoders import GeoNames
@@ -98,5 +103,5 @@ try:
 except ImportError:
 
     # Geopy not installed
-    class rlp_GeoNames(object):
+    class rlp_GeoNames:
         enable = False

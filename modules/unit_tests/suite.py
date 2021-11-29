@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Sahana Eden Unit Tests
+# Eden Unit Tests
 #
 # To run this test suite use:
 # python web2py.py -S eden -M -R applications/eden/modules/unit_tests/suite.py
@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     run_suite(
         "modules",
-        "s3",
+        "core",
         "s3db",
     )
 

@@ -1,7 +1,11 @@
-# -*- coding: utf-8 -*-
+"""
+    Custom Menus for RLPPTM
+
+    License: MIT
+"""
 
 from gluon import current
-from s3 import IS_ISO639_2_LANGUAGE_CODE
+from core import IS_ISO639_2_LANGUAGE_CODE
 from s3layouts import MM, M
 try:
     from ..RLP.layouts import *
@@ -9,7 +13,6 @@ except ImportError:
     pass
 import s3menus as default
 
-from .helpers import get_stats_projects
 from .requests import get_managed_requester_orgs
 
 # =============================================================================
@@ -46,9 +49,6 @@ class S3MainMenu(default.S3MainMenu):
         has_roles = auth.s3_has_roles
 
         is_org_group_admin = lambda i: has_role("ORG_GROUP_ADMIN", include_admin=False)
-        report_results = lambda i: has_role("VOUCHER_PROVIDER", include_admin=False) and \
-                                   len(get_stats_projects()) > 0
-
         managed_requester_orgs = get_managed_requester_orgs()
 
         supply_coordinator = lambda i: has_role("SUPPLY_COORDINATOR")
@@ -58,20 +58,16 @@ class S3MainMenu(default.S3MainMenu):
         order_access = lambda i: supply_coordinator(i) or supply_requester(i)
         supply_access = lambda i: order_access(i) or supply_distributor(i)
 
-        menu = [MM("Equipment", c=("req", "inv", "supply"), link=False, check=supply_access)(
+        menu = [MM("Tests##disease", c="disease", link=False)(
+                    MM("Test Results", f="case_diagnostics", restrict="TEST_PROVIDER"),
+                    MM("Daily Reports", f="testing_report"),
+                    ),
+                MM("Equipment", c=("req", "inv", "supply"), link=False, check=supply_access)(
                     MM("Orders##delivery", f="req", vars={"type": 1}, check=order_access),
                     MM("Shipment##process", c="inv", f="send", restrict="SUPPLY_COORDINATOR"),
                     MM("Shipments", c="inv", f="send", check=supply_distributor),
                     MM("Deliveries", c="inv", f="recv", check=supply_requester),
                     MM("Items", c="supply", f="item", restrict="SUPPLY_COORDINATOR"),
-                    ),
-                MM("Test Results",
-                   c="disease", f="case_diagnostics", restrict="DISEASE_TEST_READER",
-                   ),
-                MM("Test Results",
-                   c="disease", f="case_diagnostics", check=report_results, link=False)(
-                    MM("Report Test Result", m="create", vars={"format": "popup"}, modal=True),
-                    MM("List Test Results"),
                     ),
                 MM("Organizations",
                    c="org", f="organisation", restrict=("ORG_GROUP_ADMIN", "ORG_ADMIN"),
@@ -258,17 +254,27 @@ class S3OptionsMenu(default.S3OptionsMenu):
     @staticmethod
     def disease():
 
-        s3db = current.s3db
-        report_results = lambda i: s3db.get_config("disease_case_diagnostics",
-                                                   "insertable", True)
+        has_role = current.auth.s3_has_role
+        daily_report = lambda i: has_role("ORG_ADMIN") and \
+                                 has_role("TEST_PROVIDER", include_admin=False)
+
+        if current.deployment_settings.get_disease_testing_report_by_demographic():
+            report_function = "testing_demographic"
+        else:
+            report_function = "testing_report"
 
         return M(c="disease")(
-                    M("Test Results", f="case_diagnostics")(
-                        M("Registrieren", m="create", check=report_results),
+                    M("Test Results", f="case_diagnostics", restrict="TEST_PROVIDER")(
+                        M("Registrieren", m="register"),
                         M("Statistics", m="report"),
+                        ),
+                    M("Daily Reports", f="testing_report")(
+                        M("Create", m="create", check=daily_report),
+                        M("Statistics", f=report_function, m="report"),
                         ),
                     M("Administration", restrict="ADMIN")(
                         M("Diseases", f="disease"),
+                        M("Demographics", f="demographic"),
                         )
                     )
 
@@ -360,29 +366,31 @@ class S3OptionsMenu(default.S3OptionsMenu):
             M("Create Organization", m="create", restrict="ORG_GROUP_ADMIN"),
             )
 
-        return M(c="org")(
+        return M(c=("org", "hrm"))(
                     org_menu,
-                    M("Facilities", f="facility", link=False)(
+                    M("Facilities", f="facility", link=False, restrict="ORG_GROUP_ADMIN")(
                         M("Test Stations to review",
                           vars = {"$$review": "1"},
-                          restrict = "ORG_GROUP_ADMIN",
                           ),
                         M("Unapproved Test Stations",
                           vars = {"$$pending": "1"},
-                          restrict = "ORG_GROUP_ADMIN",
                           ),
                         M("Public Registry", m="summary"),
                         ),
-                    M("Statistics", link=False)(
+                    M("Statistics", link=False, restrict="ORG_GROUP_ADMIN")(
                         M("Organizations", f="organisation", m="report"),
                         M("Facilities", f="facility", m="report"),
                         ),
+                    M("Staff", c="hrm", f=("staff", "person"),
+                      restrict=("ORG_ADMIN", "ORG_GROUP_ADMIN"),
+                      ),
                     M("Administration", restrict=("ADMIN"))(
                         M("Facility Types", f="facility_type"),
                         M("Organization Types", f="organisation_type"),
                         M("Services", f="service"),
                         M("Service Modes", f="service_mode"),
                         M("Booking Modes", f="booking_mode"),
+                        M("Job Titles", c="hrm", f="job_title"),
                         ),
                     )
 
@@ -421,8 +429,8 @@ class S3OptionsMenu(default.S3OptionsMenu):
                 M("Shipments", c="inv", f="send", check=supply_distributor),
                 M("Deliveries", "inv", "recv", check=supply_requester),
                 M("Statistics", link=False, restrict="SUPPLY_COORDINATOR")(
-                    M("Orders##delivery", c="req", f="req", m="report"),
-                    M("Shipments", c="inv", f="send", m="report"),
+                    M("Orders##delivery", c="req", f="req_item", m="report"),
+                    M("Shipments", c="inv", f="track_item", m="report"),
                     ),
                 M("Items", c="supply", f="item")(
                     M("Create", m="create"),

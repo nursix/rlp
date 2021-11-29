@@ -4,11 +4,12 @@ from __future__ import division
 
 import os
 
+from io import StringIO
+
 from gluon import *
 from gluon.storage import Storage
 
-from s3 import json, s3_str, ICON, S3CustomController, S3DateTime, S3Method
-from s3compat import StringIO, xrange
+from core import json, s3_str, ICON, S3CustomController, S3DateTime, CRUDMethod
 
 # Compact JSON encoding
 SEPARATORS = (",", ":")
@@ -31,7 +32,7 @@ def dc_target_list_layout(list_id, item_id, resource, rfields, record):
 
         @param list_id: the HTML ID of the list
         @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
+        @param resource: the CRUDResource to render
         @param rfields: the S3ResourceFields to render
         @param record: the record as dict
     """
@@ -62,7 +63,7 @@ def doc_document_list_layout(list_id, item_id, resource, rfields, record):
 
         @param list_id: the HTML ID of the list
         @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
+        @param resource: the CRUDResource to render
         @param rfields: the S3ResourceFields to render
         @param record: the record as dict
     """
@@ -91,7 +92,7 @@ def doc_document_list_layout(list_id, item_id, resource, rfields, record):
     else:
         # Should only happen for dummy prepop
         doc_url = ""
-        
+
     button = A(T("Download PDF"),
                _href = doc_url,
                _class = "button round",
@@ -149,7 +150,7 @@ def project_project_list_layout(list_id, item_id, resource, rfields, record):
 
         @param list_id: the HTML ID of the list
         @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
+        @param resource: the CRUDResource to render
         @param rfields: the S3ResourceFields to render
         @param record: the record as dict
     """
@@ -435,7 +436,7 @@ def project_project_list_layout(list_id, item_id, resource, rfields, record):
     return item
 
 # =============================================================================
-class dc_QuestionCreate(S3Method):
+class dc_QuestionCreate(CRUDMethod):
     """
         Create a Question
     """
@@ -445,7 +446,7 @@ class dc_QuestionCreate(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -484,7 +485,7 @@ class dc_QuestionCreate(S3Method):
         return output
 
 # =============================================================================
-class dc_QuestionImageDelete(S3Method):
+class dc_QuestionImageDelete(CRUDMethod):
     """
         Delete an Image for a Question
     """
@@ -494,7 +495,7 @@ class dc_QuestionImageDelete(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -528,7 +529,7 @@ class dc_QuestionImageDelete(S3Method):
         return output
 
 # =============================================================================
-class dc_QuestionImageUpload(S3Method):
+class dc_QuestionImageUpload(CRUDMethod):
     """
         Upload an Image for a Question
     """
@@ -538,7 +539,7 @@ class dc_QuestionImageUpload(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -578,7 +579,7 @@ class dc_QuestionImageUpload(S3Method):
         return output
 
 # =============================================================================
-class dc_QuestionSave(S3Method):
+class dc_QuestionSave(CRUDMethod):
     """
         Save a Question
     """
@@ -588,7 +589,7 @@ class dc_QuestionSave(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -668,7 +669,7 @@ class dc_QuestionSave(S3Method):
         return output
 
 # =============================================================================
-class dc_TargetActivate(S3Method):
+class dc_TargetActivate(CRUDMethod):
     """
         Activate a Survey
     """
@@ -678,7 +679,7 @@ class dc_TargetActivate(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -818,7 +819,7 @@ class dc_TargetActivate(S3Method):
                                  "options": row.options,
                                  }
 
-        for posn in xrange(1, len(layout) + 1):
+        for posn in range(1, len(layout) + 1):
             item = layout[str(posn)]
             item_type = item["type"]
             if item_type == "question":
@@ -871,7 +872,7 @@ class dc_TargetActivate(S3Method):
                         displayLogic["field"] = dq["name"]
                         displayLogic.pop("id")
                         new_item["displayLogic"] = displayLogic
-                        
+
                 mappend(new_item)
 
             elif item_type == "break":
@@ -882,7 +883,7 @@ class dc_TargetActivate(S3Method):
                                                          mobile_form = True)
 
 # =============================================================================
-class dc_TargetDeactivate(S3Method):
+class dc_TargetDeactivate(CRUDMethod):
     """
         Deactivate a Survey
     """
@@ -892,7 +893,7 @@ class dc_TargetDeactivate(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -932,7 +933,7 @@ class dc_TargetDeactivate(S3Method):
         return output
 
 # =============================================================================
-class dc_TargetEdit(S3Method):
+class dc_TargetEdit(CRUDMethod):
     """
         Edit a non-Draft Survey
     """
@@ -942,7 +943,7 @@ class dc_TargetEdit(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -1066,7 +1067,7 @@ class dc_TargetEdit(S3Method):
             template.update_record(settings = settings)
 
 # =============================================================================
-class dc_TargetDelete(S3Method):
+class dc_TargetDelete(CRUDMethod):
     """
         Delete a Survey
             - confirmation popup
@@ -1079,7 +1080,7 @@ class dc_TargetDelete(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -1180,7 +1181,7 @@ class dc_TargetDelete(S3Method):
         return output
 
 # =============================================================================
-class dc_TargetName(S3Method):
+class dc_TargetName(CRUDMethod):
     """
         Rename a Survey
     """
@@ -1190,7 +1191,7 @@ class dc_TargetName(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -1237,7 +1238,7 @@ class dc_TargetName(S3Method):
         return output
 
 # =============================================================================
-class dc_TargetL10n(S3Method):
+class dc_TargetL10n(CRUDMethod):
     """
         Change the language of a Survey
 
@@ -1249,7 +1250,7 @@ class dc_TargetL10n(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -1295,7 +1296,7 @@ class dc_TargetL10n(S3Method):
                         ltable.insert(template_id = template_id,
                                       language = l10n,
                                       )
-                    
+
 
                     if l10n:
                         # Update Questions
@@ -1318,7 +1319,7 @@ class dc_TargetL10n(S3Method):
         return output
 
 # =============================================================================
-class dc_TargetReport(S3Method):
+class dc_TargetReport(CRUDMethod):
     """
         Survey Report
     """
@@ -1328,7 +1329,7 @@ class dc_TargetReport(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -1663,7 +1664,7 @@ class dc_TargetReport(S3Method):
         if report_filters is None:
             ff = ""
         else:
-            from s3 import S3FilterForm, S3OptionsFilter, S3SliderFilter
+            from core import S3FilterForm, S3OptionsFilter, S3SliderFilter
 
             questions_lookup = {}
             for q in data["questions"]:
@@ -1979,7 +1980,7 @@ class dc_TargetReport(S3Method):
                     selected_points = answer.get("selectedPoints", [])
                     for point in selected_points:
                         pappend(point)
-                    
+
                 data = {"p": points,
                         "i": question["file"],
                         }
@@ -2074,7 +2075,7 @@ class dc_TargetReport(S3Method):
 
         raise NotImplementedError
 
-        from s3.codecs.pdf import EdenDocTemplate, S3RL_PDF
+        from core.resource.codecs.pdf import EdenDocTemplate, S3RL_PDF
 
         # etc, etc
 
@@ -2094,7 +2095,7 @@ class dc_TargetReport(S3Method):
         return doc.output.getvalue()
 
 # =============================================================================
-class dc_TargetReportFilters(S3Method):
+class dc_TargetReportFilters(CRUDMethod):
     """
         Survey Report Filters
         - select which fields are used as filters in the Report
@@ -2106,7 +2107,7 @@ class dc_TargetReportFilters(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -2282,7 +2283,7 @@ class dc_TargetReportFilters(S3Method):
             r.error(404, current.ERROR.BAD_RESOURCE)
 
 # =============================================================================
-class dc_TemplateEditor(S3Method):
+class dc_TemplateEditor(CRUDMethod):
     """
         Survey Template Editor
     """
@@ -2292,7 +2293,7 @@ class dc_TemplateEditor(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -2679,7 +2680,7 @@ class dc_TemplateEditor(S3Method):
         return output
 
 # =============================================================================
-class dc_TemplateExportL10n(S3Method):
+class dc_TemplateExportL10n(CRUDMethod):
     """
         Export the Strings from a Survey to be localised
     """
@@ -2689,7 +2690,7 @@ class dc_TemplateExportL10n(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -2699,7 +2700,7 @@ class dc_TemplateExportL10n(S3Method):
 
                 # No need to check for 'read' permission within single-record methods, as that has already been checked
 
-                from s3.codecs.xls import S3XLS
+                from core.resource.codecs.xls import S3XLS
 
                 try:
                     import xlwt
@@ -2850,11 +2851,11 @@ class dc_TemplateExportL10n(S3Method):
                 # 1st row => Column Titles
                 current_row = sheet.row(0)
                 write = current_row.write
-                for i in xrange(6):
+                for i in range(6):
                     write(i, labels[i])
 
                 # Data rows
-                for i in xrange(len(sorted_instructions)):
+                for i in range(len(sorted_instructions)):
                     instructions = sorted_instructions[i]
                     current_row = sheet.row(i + 1)
                     write = current_row.write
@@ -2876,7 +2877,7 @@ class dc_TemplateExportL10n(S3Method):
                           "Other",
                           "Translated Other"
                           ]
-                for i in xrange(1, max_options + 1):
+                for i in range(1, max_options + 1):
                     labels += ["Option %s" % i,
                                "Translated Option %s" % i,
                                ]
@@ -2894,11 +2895,11 @@ class dc_TemplateExportL10n(S3Method):
                 # 1st row => Column Titles
                 current_row = sheet.row(0)
                 write = current_row.write
-                for i in xrange(len(labels)):
+                for i in range(len(labels)):
                     write(i, labels[i])
 
                 # Data rows
-                for i in xrange(len(sorted_questions)):
+                for i in range(len(sorted_questions)):
                     question = sorted_questions[i]
                     current_row = sheet.row(i + 1)
                     write = current_row.write
@@ -2911,7 +2912,7 @@ class dc_TemplateExportL10n(S3Method):
                     options = question["options"]
                     options_l10n = question["options_l10n"]
                     cell = 4
-                    for j in xrange(len(options)):
+                    for j in range(len(options)):
                         cell = cell + 2
                         write(cell, options[j])
                         try:
@@ -2941,7 +2942,7 @@ class dc_TemplateExportL10n(S3Method):
                 response.headers["Content-disposition"] = disposition
 
                 return output.read()
-                
+
             else:
                 r.error(415, current.ERROR.BAD_FORMAT)
         else:
@@ -2950,7 +2951,7 @@ class dc_TemplateExportL10n(S3Method):
         return output
 
 # =============================================================================
-class dc_TemplateImportL10n(S3Method):
+class dc_TemplateImportL10n(CRUDMethod):
     """
         Import the Strings to localise a Survey
     """
@@ -2960,7 +2961,7 @@ class dc_TemplateImportL10n(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -2974,7 +2975,7 @@ class dc_TemplateImportL10n(S3Method):
                     r.unauthorised()
                 field_storage = r.post_vars.get("file")
                 if field_storage not in ("", None):
-                
+
                     # Set Response Headers now so that we can return feedback to users
                     current.response.headers["Content-Type"] = "application/json"
 
@@ -3014,7 +3015,7 @@ class dc_TemplateImportL10n(S3Method):
                                             on_demand = True)
 
                     sheet = wb.sheet_by_name("Instructions")
-                    for i in xrange(1, sheet.nrows):
+                    for i in range(1, sheet.nrows):
                         template = int(sheet.cell(i, 0).value)
                         if template != template_id:
                             message = current.T("Importing into wrong Template")
@@ -3042,7 +3043,7 @@ class dc_TemplateImportL10n(S3Method):
                     questions = {}
                     question_ids = []
                     qappend = question_ids.append
-                    for i in xrange(1, sheet.nrows):
+                    for i in range(1, sheet.nrows):
                         template = int(sheet.cell(i, 0).value)
                         if template != template_id:
                             # @ToDo: Message getting swallowed by fileupload
@@ -3057,7 +3058,7 @@ class dc_TemplateImportL10n(S3Method):
                         other_l10n = sheet.cell(i, 5).value
                         options = []
                         options_l10n = []
-                        for j in xrange(6, cols, 2):
+                        for j in range(6, cols, 2):
                             option = sheet.cell(i, j).value
                             if not option:
                                 break
@@ -3111,7 +3112,7 @@ class dc_TemplateImportL10n(S3Method):
                             qoptions_l10n = question["options_l10n"]
                             options_l10n = []
                             option_errors = 0
-                            for i in xrange(options_length):
+                            for i in range(options_length):
                                 if qoptions[i] == doptions[i]:
                                     options_l10n.append(qoptions_l10n[i])
                                 else:
@@ -3154,7 +3155,7 @@ class dc_TemplateImportL10n(S3Method):
         return output
 
 # =============================================================================
-class dc_TemplateSave(S3Method):
+class dc_TemplateSave(CRUDMethod):
     """
         Save a Survey
     """
@@ -3164,7 +3165,7 @@ class dc_TemplateSave(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 
@@ -3193,7 +3194,7 @@ class dc_TemplateSave(S3Method):
         return output
 
 # =============================================================================
-class dc_ProjectDelete(S3Method):
+class dc_ProjectDelete(CRUDMethod):
     """
         Delete a Project
             - confirmation popup
@@ -3205,7 +3206,7 @@ class dc_ProjectDelete(S3Method):
         """
             Entry point for REST API
 
-            @param r: the S3Request
+            @param r: the CRUDRequest
             @param attr: controller arguments
         """
 

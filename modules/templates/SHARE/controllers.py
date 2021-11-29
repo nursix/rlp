@@ -4,11 +4,11 @@ import dateutil
 import json
 
 from gluon import current, A, BR, DIV, H3, H4, HR, LI, P, SPAN, TAG, TEXTAREA, UL, URL, XML
-from s3 import ICON, \
-               s3_str, \
-               S3CustomController, \
-               S3FilterForm, S3LocationFilter, S3OptionsFilter, S3TextFilter, \
-               S3Represent
+from core import ICON,
+                 get_crud_string, s3_str, \
+                 S3CustomController, \
+                 S3FilterForm, S3LocationFilter, S3OptionsFilter, S3TextFilter, \
+                 S3Represent
 
 THEME = "SHARE"
 
@@ -58,9 +58,8 @@ class index(S3CustomController):
                                    )
         len_sitreps = len(sitreps)
         if len_sitreps == 0:
-            from s3 import S3CRUD
-            recent_updates = DIV(S3CRUD.crud_string("event_sitrep",
-                                                    "msg_list_empty"),
+            recent_updates = DIV(get_crud_string("event_sitrep",
+                                                 "msg_list_empty"),
                                  _class="empty")
         else:
             recent_updates = DIV()
@@ -162,7 +161,7 @@ class index(S3CustomController):
         output["item"] = item
 
         # Inject D3 scripts
-        from s3 import S3Report
+        from core import S3Report
         S3Report.inject_d3()
 
         # Inject charts-script
@@ -208,7 +207,7 @@ def cms_post_list_layout(list_id, item_id, resource, rfields, record):
 
         @param list_id: the HTML ID of the list
         @param item_id: the HTML ID of the item
-        @param resource: the S3Resource to render
+        @param resource: the CRUDResource to render
         @param rfields: the S3ResourceFields to render
         @param record: the record as dict
     """
@@ -752,7 +751,7 @@ class project_ActivityRepresent(S3Represent):
         return rows
 
     # -------------------------------------------------------------------------
-    def represent_row(self, row, prefix=None):
+    def represent_row(self, row):
         """
             Represent a single Row
 
@@ -824,7 +823,7 @@ class req_NeedRepresent(S3Represent):
         return rows
 
     # -------------------------------------------------------------------------
-    def represent_row(self, row, prefix=None):
+    def represent_row(self, row):
         """
             Represent a single Row
 
@@ -1066,7 +1065,7 @@ class HomepageStatistics(object):
         """
 
         import datetime, os
-        from s3 import S3DateTime
+        from core import S3DateTime
 
         # Probe file (probing one is good enough since update_data
         # writes them all at the same time)
